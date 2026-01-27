@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Station Details - Roaring</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .back-link {
+            color: #666;
+            text-decoration: none;
+            font-size: 1.25rem;
+        }
+
+        .back-link:hover {
+            color: #333;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: #1a1a1a;
+        }
+
+        .header-info {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+            color: #666;
+        }
+
+        .refresh-btn {
+            background: #333;
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #555;
+        }
+
+        .refresh-btn:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        main {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .current-conditions {
+            background: #fff;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .condition-item {
+            text-align: center;
+        }
+
+        .condition-label {
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .condition-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .condition-unit {
+            font-size: 0.875rem;
+            font-weight: 400;
+            color: #666;
+        }
+
+        .chart-container {
+            background: #fff;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+        }
+
+        .chart-title {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: #1a1a1a;
+        }
+
+        .chart-canvas {
+            width: 100%;
+            height: 250px;
+        }
+
+        .legend {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 0.75rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 3px;
+            border-radius: 1px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 4rem;
+            color: #666;
+        }
+
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+            font-size: 0.75rem;
+        }
+
+        footer a {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <a href="index.html" class="back-link">←</a>
+            <h1 id="stationName">Loading...</h1>
+        </div>
+        <div class="header-info">
+            <span id="lastUpdate">Loading...</span>
+            <button class="refresh-btn" id="refreshBtn" onclick="loadData()">Refresh</button>
+        </div>
+    </header>
+
+    <main>
+        <div id="errorContainer"></div>
+
+        <div class="current-conditions" id="currentConditions">
+            <div class="condition-item">
+                <div class="condition-label">Wind Speed</div>
+                <div class="condition-value" id="windSpeed">--</div>
+            </div>
+            <div class="condition-item">
+                <div class="condition-label">Gusts</div>
+                <div class="condition-value" id="gustSpeed">--</div>
+            </div>
+            <div class="condition-item">
+                <div class="condition-label">Direction</div>
+                <div class="condition-value" id="windDir">--</div>
+            </div>
+            <div class="condition-item">
+                <div class="condition-label">Temperature</div>
+                <div class="condition-value" id="airTemp">--</div>
+            </div>
+            <div class="condition-item">
+                <div class="condition-label">Pressure</div>
+                <div class="condition-value" id="pressure">--</div>
+            </div>
+            <div class="condition-item">
+                <div class="condition-label">Humidity</div>
+                <div class="condition-value" id="humidity">--</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Wind Speed, Gusts & Direction</div>
+            <canvas id="windChart" class="chart-canvas" style="height: 300px;"></canvas>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #e63946;"></div>
+                    <span>Speed (kt)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #aaa;"></div>
+                    <span>Gusts (kt)</span>
+                </div>
+                <div class="legend-item">
+                    <svg width="16" height="10"><circle cx="5" cy="5" r="4" fill="#457b9d"/></svg>
+                    <span>Direction (°)</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Barometric Pressure</div>
+            <canvas id="pressureChart" class="chart-canvas"></canvas>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #2a9d8f;"></div>
+                    <span>Pressure (hPa)</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        Data from <a href="http://www.bom.gov.au" target="_blank">Bureau of Meteorology</a> |
+        Updates every 10 minutes
+    </footer>
+
+    <script>
+        // Station URLs
+        // Use local proxy when running on localhost, direct BOM URLs otherwise
+        const USE_PROXY = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const BOM_BASE = USE_PROXY ? '/bom-proxy/' : 'https://www.bom.gov.au/fwo/IDT60901/';
+
+        const STATION_URLS = {
+            '94988': BOM_BASE + 'IDT60901.94988.json',
+            '94970': BOM_BASE + 'IDT60901.94970.json',
+            '94619': BOM_BASE + 'IDT60901.94619.json',
+            '95979': BOM_BASE + 'IDT60901.95979.json',
+            '94951': BOM_BASE + 'IDT60901.94951.json',
+            '95986': BOM_BASE + 'IDT60901.95986.json',
+            '95967': BOM_BASE + 'IDT60901.95967.json'
+        };
+
+        const STATION_NAMES = {
+            '94988': 'Dennes Point',
+            '94970': 'Hobart (Ellerslie Road)',
+            '94619': 'Hobart Airport',
+            '95979': 'kunanyi (Mt Wellington)',
+            '94951': 'Geeveston',
+            '95986': 'Maatsuyker Island',
+            '95967': 'Cape Bruny'
+        };
+
+        let stationId = null;
+        let chartData = [];
+
+        // Convert wind direction to degrees
+        function windDirToDegrees(dir) {
+            const directions = {
+                'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+                'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+                'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+                'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+            };
+            return directions[dir] ?? null;
+        }
+
+        // Parse BOM datetime
+        function parseDateTime(dtStr) {
+            // Format: 20260127173000
+            const year = parseInt(dtStr.slice(0, 4));
+            const month = parseInt(dtStr.slice(4, 6)) - 1;
+            const day = parseInt(dtStr.slice(6, 8));
+            const hour = parseInt(dtStr.slice(8, 10));
+            const minute = parseInt(dtStr.slice(10, 12));
+            return new Date(year, month, day, hour, minute);
+        }
+
+        // Format time for display
+        function formatTime(date) {
+            return date.toLocaleTimeString('en-AU', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
+        }
+
+        // Draw a line chart
+        function drawLineChart(canvas, datasets, options = {}) {
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+
+            const width = rect.width;
+            const height = rect.height;
+            const padding = { top: 20, right: options.rightAxis ? 50 : 20, bottom: 40, left: 50 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            ctx.clearRect(0, 0, width, height);
+
+            // Get all values for scaling (only from non-rightAxis datasets)
+            const leftDatasets = datasets.filter(d => !d.rightAxis);
+            const allValues = leftDatasets.flatMap(d => d.data.filter(v => v !== null));
+            let minVal = Math.min(...allValues);
+            let maxVal = Math.max(...allValues);
+
+            // Add padding to range
+            const range = maxVal - minVal || 1;
+            minVal = minVal - range * 0.1;
+            maxVal = maxVal + range * 0.1;
+
+            if (options.minY !== undefined) minVal = options.minY;
+            if (options.maxY !== undefined) maxVal = options.maxY;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#eee';
+            ctx.lineWidth = 1;
+            const gridLines = 5;
+            for (let i = 0; i <= gridLines; i++) {
+                const y = padding.top + (chartHeight / gridLines) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(width - padding.right, y);
+                ctx.stroke();
+
+                // Left Y-axis labels
+                const val = maxVal - ((maxVal - minVal) / gridLines) * i;
+                ctx.fillStyle = '#666';
+                ctx.font = '11px -apple-system, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(val.toFixed(options.decimals || 0), padding.left - 8, y + 4);
+            }
+
+            // Right Y-axis labels (for direction: 0-360)
+            if (options.rightAxis) {
+                ctx.fillStyle = '#457b9d';
+                ctx.textAlign = 'left';
+                const dirLabels = ['N', 'E', 'S', 'W', 'N'];
+                for (let i = 0; i <= 4; i++) {
+                    const y = padding.top + (chartHeight / 4) * i;
+                    ctx.fillText(dirLabels[4 - i], width - padding.right + 8, y + 4);
+                }
+            }
+
+            // Draw datasets
+            datasets.forEach((dataset, idx) => {
+                const data = dataset.data;
+                const color = dataset.color;
+
+                // Determine Y scale for this dataset
+                let dsMinVal = minVal, dsMaxVal = maxVal;
+                if (dataset.rightAxis) {
+                    dsMinVal = 0;
+                    dsMaxVal = 360;
+                }
+
+                if (dataset.dotsOnly) {
+                    // Draw as dots only (for direction)
+                    ctx.fillStyle = color;
+                    data.forEach((val, i) => {
+                        if (val === null) return;
+                        const x = padding.left + (chartWidth / (data.length - 1)) * i;
+                        const y = padding.top + chartHeight - ((val - dsMinVal) / (dsMaxVal - dsMinVal)) * chartHeight;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                } else {
+                    // Draw as line
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = dataset.lineWidth || 2;
+                    ctx.beginPath();
+
+                    let started = false;
+                    data.forEach((val, i) => {
+                        if (val === null) return;
+
+                        const x = padding.left + (chartWidth / (data.length - 1)) * i;
+                        const y = padding.top + chartHeight - ((val - dsMinVal) / (dsMaxVal - dsMinVal)) * chartHeight;
+
+                        if (!started) {
+                            ctx.moveTo(x, y);
+                            started = true;
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    });
+                    ctx.stroke();
+                }
+            });
+
+            // Draw X-axis labels
+            ctx.fillStyle = '#666';
+            ctx.font = '11px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+
+            const labels = options.labels || [];
+            const labelStep = Math.ceil(labels.length / 8);
+            labels.forEach((label, i) => {
+                if (i % labelStep !== 0 && i !== labels.length - 1) return;
+                const x = padding.left + (chartWidth / (labels.length - 1)) * i;
+                ctx.fillText(label, x, height - padding.bottom + 20);
+            });
+
+            // Y-axis label (left)
+            if (options.yLabel) {
+                ctx.save();
+                ctx.fillStyle = '#666';
+                ctx.translate(12, height / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.textAlign = 'center';
+                ctx.fillText(options.yLabel, 0, 0);
+                ctx.restore();
+            }
+
+            // Y-axis label (right)
+            if (options.rightAxisLabel) {
+                ctx.save();
+                ctx.fillStyle = '#457b9d';
+                ctx.translate(width - 8, height / 2);
+                ctx.rotate(Math.PI / 2);
+                ctx.textAlign = 'center';
+                ctx.fillText(options.rightAxisLabel, 0, 0);
+                ctx.restore();
+            }
+        }
+
+        // Update current conditions display
+        function updateCurrentConditions(data) {
+            const latest = data[0];
+
+            document.getElementById('windSpeed').innerHTML =
+                latest.wind_spd_kt !== null
+                    ? `${latest.wind_spd_kt} <span class="condition-unit">kt</span>`
+                    : '--';
+
+            document.getElementById('gustSpeed').innerHTML =
+                latest.gust_kt !== null
+                    ? `${latest.gust_kt} <span class="condition-unit">kt</span>`
+                    : '--';
+
+            document.getElementById('windDir').textContent = latest.wind_dir || '--';
+
+            document.getElementById('airTemp').innerHTML =
+                latest.air_temp !== null
+                    ? `${latest.air_temp}<span class="condition-unit">°C</span>`
+                    : '--';
+
+            document.getElementById('pressure').innerHTML =
+                latest.press !== null
+                    ? `${latest.press} <span class="condition-unit">hPa</span>`
+                    : '--';
+
+            document.getElementById('humidity').innerHTML =
+                latest.rel_hum !== null
+                    ? `${latest.rel_hum}<span class="condition-unit">%</span>`
+                    : '--';
+        }
+
+        // Draw all charts
+        function drawCharts(data) {
+            // Reverse data so oldest is first (left side of chart)
+            const reversed = [...data].reverse();
+
+            // Take last 24 hours worth of data (144 readings at 10min intervals, but usually ~72 available)
+            const displayData = reversed.slice(-72);
+
+            const times = displayData.map(d => {
+                const dt = parseDateTime(d.local_date_time_full);
+                return formatTime(dt);
+            });
+
+            // Combined wind chart with speed, gusts, and direction (dual Y-axis)
+            drawLineChart(document.getElementById('windChart'), [
+                {
+                    data: displayData.map(d => d.gust_kt),
+                    color: '#aaa',
+                    lineWidth: 1.5
+                },
+                {
+                    data: displayData.map(d => d.wind_spd_kt),
+                    color: '#e63946',
+                    lineWidth: 2
+                },
+                {
+                    data: displayData.map(d => windDirToDegrees(d.wind_dir)),
+                    color: '#457b9d',
+                    rightAxis: true,
+                    dotsOnly: true
+                }
+            ], {
+                labels: times,
+                yLabel: 'Speed (kt)',
+                rightAxis: true,
+                rightAxisLabel: 'Direction',
+                minY: 0
+            });
+
+            // Pressure chart
+            drawLineChart(document.getElementById('pressureChart'), [
+                {
+                    data: displayData.map(d => d.press),
+                    color: '#2a9d8f',
+                    lineWidth: 2
+                }
+            ], {
+                labels: times,
+                yLabel: 'Pressure (hPa)',
+                decimals: 1
+            });
+        }
+
+        // Load station data
+        async function loadData() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+
+            document.getElementById('errorContainer').innerHTML = '';
+
+            try {
+                const url = STATION_URLS[stationId];
+                if (!url) throw new Error('Unknown station');
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const json = await response.json();
+                chartData = json.observations.data;
+
+                document.getElementById('stationName').textContent =
+                    STATION_NAMES[stationId] || json.observations.header[0].name;
+
+                updateCurrentConditions(chartData);
+                drawCharts(chartData);
+                updateLastRefresh();
+
+            } catch (error) {
+                document.getElementById('errorContainer').innerHTML =
+                    `<div class="error">Error loading data: ${error.message}. This may be due to CORS restrictions when opening locally.</div>`;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Refresh';
+        }
+
+        // Update last refresh time
+        function updateLastRefresh() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-AU', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            document.getElementById('lastUpdate').textContent = `Updated ${timeStr}`;
+        }
+
+        // Handle window resize
+        function handleResize() {
+            if (chartData.length > 0) {
+                drawCharts(chartData);
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            stationId = params.get('id');
+
+            if (!stationId || !STATION_URLS[stationId]) {
+                document.getElementById('errorContainer').innerHTML =
+                    '<div class="error">Invalid station ID. <a href="index.html">Return to map</a></div>';
+                return;
+            }
+
+            document.getElementById('stationName').textContent = STATION_NAMES[stationId] || 'Loading...';
+            loadData();
+
+            window.addEventListener('resize', handleResize);
+        });
+    </script>
+</body>
+</html>

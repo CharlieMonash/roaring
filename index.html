@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roaring</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: #1a1a1a;
+        }
+
+        .header-info {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+            color: #666;
+        }
+
+        .refresh-btn {
+            background: #333;
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #555;
+        }
+
+        .refresh-btn:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .map-container {
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+
+        .wind-marker {
+            background: rgba(255,255,255,0.95);
+            border-radius: 6px;
+            padding: 5px 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .wind-marker:hover {
+            transform: scale(1.1);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+            z-index: 1000 !important;
+        }
+
+        .wind-marker-data {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .wind-marker-speed {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .wind-marker-arrow {
+            width: 18px;
+            height: 18px;
+        }
+
+        .wind-marker-arrow svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .toggle-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .toggle-btn {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            color: #666;
+            transition: all 0.15s;
+        }
+
+        .toggle-btn:hover {
+            border-color: #999;
+            color: #333;
+        }
+
+        .toggle-btn.active {
+            background: #333;
+            border-color: #333;
+            color: #fff;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+            font-size: 0.75rem;
+        }
+
+        footer a {
+            color: #666;
+        }
+
+        /* Muted map tiles */
+        .leaflet-tile {
+            filter: saturate(0.3) brightness(1.05);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Roaring</h1>
+        <div class="header-info">
+            <span id="lastUpdate">Loading...</span>
+            <button class="refresh-btn" id="refreshBtn" onclick="loadAllData()">Refresh</button>
+        </div>
+    </header>
+
+    <main>
+        <div id="errorContainer"></div>
+
+        <div class="toggle-buttons">
+            <button class="toggle-btn active" data-mode="wind" onclick="setDisplayMode('wind')">Wind</button>
+            <button class="toggle-btn" data-mode="gusts" onclick="setDisplayMode('gusts')">Gusts</button>
+            <button class="toggle-btn" data-mode="temp" onclick="setDisplayMode('temp')">Temperature</button>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </main>
+
+    <footer>
+        Data from <a href="http://www.bom.gov.au" target="_blank">Bureau of Meteorology</a> |
+        Updates every 10 minutes
+    </footer>
+
+    <script>
+        // BOM station data URLs
+        const USE_PROXY = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const BOM_BASE = USE_PROXY ? '/bom-proxy/' : 'https://www.bom.gov.au/fwo/IDT60901/';
+
+        const STATIONS = [
+            { id: '94988', url: BOM_BASE + 'IDT60901.94988.json', name: 'Dennes Point' },
+            { id: '94970', url: BOM_BASE + 'IDT60901.94970.json', name: 'Hobart' },
+            { id: '94619', url: BOM_BASE + 'IDT60901.94619.json', name: 'Hobart Airport' },
+            { id: '95979', url: BOM_BASE + 'IDT60901.95979.json', name: 'kunanyi' },
+            { id: '94951', url: BOM_BASE + 'IDT60901.94951.json', name: 'Geeveston' },
+            { id: '95986', url: BOM_BASE + 'IDT60901.95986.json', name: 'Maatsuyker Is.' },
+            { id: '95967', url: BOM_BASE + 'IDT60901.95967.json', name: 'Cape Bruny' }
+        ];
+
+        // Verified coordinates for each station
+        const FALLBACK_COORDS = {
+            '94988': { lat: -43.1833, lon: 147.3667 },  // Dennes Point - North Bruny Island
+            '94970': { lat: -42.8897, lon: 147.3253 },  // Hobart (Ellerslie Road) - central Hobart
+            '94619': { lat: -42.8367, lon: 147.5042 },  // Hobart Airport - east of city near Cambridge
+            '95979': { lat: -42.8950, lon: 147.2408 },  // kunanyi/Mt Wellington - summit west of Hobart
+            '94951': { lat: -43.1619, lon: 146.9269 },  // Geeveston - Huon Valley, southwest
+            '95986': { lat: -43.6556, lon: 146.2681 },  // Maatsuyker Island - far southwest offshore
+            '95967': { lat: -43.4886, lon: 147.1444 }   // Cape Bruny - southern tip of Bruny Island
+        };
+
+        let stationData = {};
+        let map = null;
+        let markers = {};
+        let displayMode = 'wind';  // 'wind', 'gusts', or 'temp'
+
+        // Initialize map
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: true,
+                scrollWheelZoom: true
+            }).setView([-43.0, 147.0], 9);
+
+            // Use CartoDB Positron for a clean, muted look
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }).addTo(map);
+        }
+
+        // Convert wind direction to degrees
+        function windDirToDegrees(dir) {
+            const directions = {
+                'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+                'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+                'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+                'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5,
+                'CALM': null
+            };
+            return directions[dir] ?? null;
+        }
+
+        // Create wind arrow SVG
+        function createWindArrowSVG(direction, speed) {
+            if (!direction || speed === 0 || speed === null) {
+                // Calm - circle
+                return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="none" stroke="#999" stroke-width="2"/></svg>`;
+            }
+
+            const degrees = windDirToDegrees(direction);
+            if (degrees === null) {
+                return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="none" stroke="#999" stroke-width="2"/></svg>`;
+            }
+
+            // Arrow pointing where wind is coming FROM (meteorological convention)
+            const rotation = degrees;
+            return `<svg viewBox="0 0 24 24">
+                <g transform="rotate(${rotation}, 12, 12)">
+                    <line x1="12" y1="4" x2="12" y2="20" stroke="#e63946" stroke-width="2.5" stroke-linecap="round"/>
+                    <polyline points="7,15 12,20 17,15" fill="none" stroke="#e63946" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </g>
+            </svg>`;
+        }
+
+        // Create custom marker based on display mode
+        function createMarker(id, data) {
+            const latest = data.data[0];
+            // Use our verified coordinates - API lat/lon can be unreliable
+            const coords = {
+                lat: FALLBACK_COORDS[id]?.lat || latest.lat,
+                lon: FALLBACK_COORDS[id]?.lon || latest.lon
+            };
+
+            if (!coords.lat || !coords.lon) return null;
+
+            const windDir = latest.wind_dir || '';
+            let displayValue = '';
+            let showArrow = true;
+
+            if (displayMode === 'wind') {
+                displayValue = latest.wind_spd_kt !== null ? `${latest.wind_spd_kt}kt` : '--';
+            } else if (displayMode === 'gusts') {
+                displayValue = latest.gust_kt !== null ? `${latest.gust_kt}kt` : '--';
+            } else if (displayMode === 'temp') {
+                displayValue = latest.air_temp !== null ? `${latest.air_temp}°C` : '--';
+                showArrow = false;
+            }
+
+            const html = `
+                <div class="wind-marker" onclick="goToStation('${id}')">
+                    <div class="wind-marker-data">
+                        ${showArrow ? `<div class="wind-marker-arrow">${createWindArrowSVG(latest.wind_dir, latest.wind_spd_kt)}</div>` : ''}
+                        <span class="wind-marker-speed">${displayValue}</span>
+                    </div>
+                </div>
+            `;
+
+            const icon = L.divIcon({
+                html: html,
+                className: 'wind-marker-container',
+                iconSize: null,
+                iconAnchor: [45, 12]
+            });
+
+            return L.marker([coords.lat, coords.lon], { icon: icon });
+        }
+
+        // Set display mode and refresh markers
+        function setDisplayMode(mode) {
+            displayMode = mode;
+            // Update button states
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            // Refresh markers
+            updateMap();
+        }
+
+        // Fetch data from a single station
+        async function fetchStation(station) {
+            try {
+                const response = await fetch(station.url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return {
+                    id: station.id,
+                    ...data.observations
+                };
+            } catch (error) {
+                console.error(`Failed to fetch ${station.name}:`, error);
+                return { id: station.id, error: error.message };
+            }
+        }
+
+        // Load all station data
+        async function loadAllData() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+
+            document.getElementById('errorContainer').innerHTML = '';
+
+            try {
+                const results = await Promise.all(STATIONS.map(fetchStation));
+
+                let errors = [];
+                results.forEach(result => {
+                    if (result.error) {
+                        errors.push(result.id);
+                    } else {
+                        stationData[result.id] = result;
+                    }
+                });
+
+                if (errors.length > 0 && errors.length < STATIONS.length) {
+                    document.getElementById('errorContainer').innerHTML =
+                        `<div class="error">Some stations unavailable. Data may be incomplete.</div>`;
+                } else if (errors.length === STATIONS.length) {
+                    document.getElementById('errorContainer').innerHTML =
+                        `<div class="error">Unable to fetch BOM data. This may be due to CORS restrictions. Try running via the local server: python3 server.py</div>`;
+                }
+
+                updateMap();
+                updateLastRefresh();
+
+            } catch (error) {
+                document.getElementById('errorContainer').innerHTML =
+                    `<div class="error">Error loading data: ${error.message}</div>`;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Refresh';
+        }
+
+        // Update map markers
+        function updateMap() {
+            // Clear existing markers
+            Object.values(markers).forEach(m => map.removeLayer(m));
+            markers = {};
+
+            const bounds = [];
+
+            Object.entries(stationData).forEach(([id, data]) => {
+                if (!data.data || data.data.length === 0) return;
+
+                const marker = createMarker(id, data);
+                if (marker) {
+                    marker.addTo(map);
+                    markers[id] = marker;
+                    bounds.push(marker.getLatLng());
+                }
+            });
+
+            // Fit map to show all markers
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+
+        // Navigate to station detail
+        function goToStation(id) {
+            window.location.href = `station.html?id=${id}`;
+        }
+
+        // Update last refresh time
+        function updateLastRefresh() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-AU', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            document.getElementById('lastUpdate').textContent = `Updated ${timeStr}`;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            loadAllData();
+        });
+    </script>
+</body>
+</html>
