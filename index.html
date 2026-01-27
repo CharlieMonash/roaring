@@ -203,8 +203,11 @@
 
     <script>
         // BOM station data URLs
-        const USE_PROXY = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const BOM_BASE = USE_PROXY ? '/bom-proxy/' : 'https://www.bom.gov.au/fwo/IDT60901/';
+        // CONFIGURATION: Set your Cloudflare Worker URL here after deployment
+        const WORKER_URL = 'https://d1-template.charliedixon49.workers.dev/'; // e.g., 'https://roaring-proxy.your-subdomain.workers.dev/'
+
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const BOM_BASE = isLocalhost ? '/bom-proxy/' : WORKER_URL;
 
         const STATIONS = [
             { id: '94988', url: BOM_BASE + 'IDT60901.94988.json', name: 'Dennes Point' },

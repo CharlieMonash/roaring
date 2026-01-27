@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pressure - Roaring</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .back-link {
+            color: #666;
+            text-decoration: none;
+            font-size: 1.25rem;
+        }
+
+        .back-link:hover {
+            color: #333;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: #1a1a1a;
+        }
+
+        .header-info {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+            color: #666;
+        }
+
+        .refresh-btn {
+            background: #333;
+            color: #fff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #555;
+        }
+
+        .refresh-btn:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        main {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .chart-container {
+            background: #fff;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .chart-title {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+            color: #1a1a1a;
+        }
+
+        .chart-canvas {
+            width: 100%;
+            height: 400px;
+        }
+
+        .legend {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 3px;
+            border-radius: 1px;
+        }
+
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+            font-size: 0.75rem;
+        }
+
+        footer a {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <a href="index.html" class="back-link">←</a>
+            <h1>Barometric Pressure</h1>
+        </div>
+        <div class="header-info">
+            <span id="lastUpdate">Loading...</span>
+            <button class="refresh-btn" id="refreshBtn" onclick="loadAllData()">Refresh</button>
+        </div>
+    </header>
+
+    <main>
+        <div id="errorContainer"></div>
+
+        <div class="chart-container">
+            <div class="chart-title">All Stations</div>
+            <canvas id="pressureChart" class="chart-canvas"></canvas>
+            <div class="legend" id="legend"></div>
+        </div>
+    </main>
+
+    <footer>
+        Data from <a href="http://www.bom.gov.au" target="_blank">Bureau of Meteorology</a> |
+        Updates every 10 minutes
+    </footer>
+
+    <script>
+        // CONFIGURATION: Set your Cloudflare Worker URL here after deployment
+        const WORKER_URL = 'https://d1-template.charliedixon49.workers.dev/'; // e.g., 'https://roaring-proxy.your-subdomain.workers.dev/'
+
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const BOM_BASE = isLocalhost ? '/bom-proxy/' : WORKER_URL;
+
+        const STATIONS = [
+            { id: '94988', url: BOM_BASE + 'IDT60901.94988.json', name: 'Dennes Point', color: '#e63946' },
+            { id: '94970', url: BOM_BASE + 'IDT60901.94970.json', name: 'Hobart', color: '#457b9d' },
+            { id: '94619', url: BOM_BASE + 'IDT60901.94619.json', name: 'Hobart Airport', color: '#2a9d8f' },
+            { id: '95979', url: BOM_BASE + 'IDT60901.95979.json', name: 'kunanyi', color: '#e9c46a' },
+            { id: '94951', url: BOM_BASE + 'IDT60901.94951.json', name: 'Geeveston', color: '#f4a261' },
+            { id: '95986', url: BOM_BASE + 'IDT60901.95986.json', name: 'Maatsuyker Is.', color: '#9c89b8' },
+            { id: '95967', url: BOM_BASE + 'IDT60901.95967.json', name: 'Cape Bruny', color: '#06d6a0' }
+        ];
+
+        let stationData = {};
+
+        // Parse BOM datetime
+        function parseDateTime(dtStr) {
+            const year = parseInt(dtStr.slice(0, 4));
+            const month = parseInt(dtStr.slice(4, 6)) - 1;
+            const day = parseInt(dtStr.slice(6, 8));
+            const hour = parseInt(dtStr.slice(8, 10));
+            const minute = parseInt(dtStr.slice(10, 12));
+            return new Date(year, month, day, hour, minute);
+        }
+
+        // Format time for display
+        function formatTime(date) {
+            return date.toLocaleTimeString('en-AU', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
+        }
+
+        // Draw multi-line chart
+        function drawPressureChart(allData) {
+            const canvas = document.getElementById('pressureChart');
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+
+            const width = rect.width;
+            const height = rect.height;
+            const padding = { top: 20, right: 20, bottom: 40, left: 60 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            ctx.clearRect(0, 0, width, height);
+
+            // Get all pressure values to find min/max
+            const allPressures = [];
+            let maxDataPoints = 0;
+            let timeLabels = [];
+
+            Object.entries(allData).forEach(([id, data]) => {
+                if (!data.data) return;
+                const reversed = [...data.data].reverse().slice(-72);
+                if (reversed.length > maxDataPoints) {
+                    maxDataPoints = reversed.length;
+                    timeLabels = reversed.map(d => formatTime(parseDateTime(d.local_date_time_full)));
+                }
+                reversed.forEach(d => {
+                    if (d.press !== null) allPressures.push(d.press);
+                });
+            });
+
+            if (allPressures.length === 0) return;
+
+            let minVal = Math.min(...allPressures);
+            let maxVal = Math.max(...allPressures);
+            const range = maxVal - minVal || 1;
+            minVal = minVal - range * 0.1;
+            maxVal = maxVal + range * 0.1;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#eee';
+            ctx.lineWidth = 1;
+            const gridLines = 5;
+            for (let i = 0; i <= gridLines; i++) {
+                const y = padding.top + (chartHeight / gridLines) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(width - padding.right, y);
+                ctx.stroke();
+
+                const val = maxVal - ((maxVal - minVal) / gridLines) * i;
+                ctx.fillStyle = '#666';
+                ctx.font = '11px -apple-system, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(val.toFixed(1), padding.left - 8, y + 4);
+            }
+
+            // Draw each station's pressure line
+            STATIONS.forEach(station => {
+                const data = allData[station.id];
+                if (!data || !data.data) return;
+
+                const reversed = [...data.data].reverse().slice(-72);
+                const pressures = reversed.map(d => d.press);
+
+                ctx.strokeStyle = station.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let started = false;
+                pressures.forEach((val, i) => {
+                    if (val === null) return;
+                    const x = padding.left + (chartWidth / (maxDataPoints - 1)) * i;
+                    const y = padding.top + chartHeight - ((val - minVal) / (maxVal - minVal)) * chartHeight;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.stroke();
+            });
+
+            // Draw X-axis labels
+            ctx.fillStyle = '#666';
+            ctx.font = '11px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+
+            const labelStep = Math.ceil(timeLabels.length / 8);
+            timeLabels.forEach((label, i) => {
+                if (i % labelStep !== 0 && i !== timeLabels.length - 1) return;
+                const x = padding.left + (chartWidth / (timeLabels.length - 1)) * i;
+                ctx.fillText(label, x, height - padding.bottom + 20);
+            });
+
+            // Y-axis label
+            ctx.save();
+            ctx.fillStyle = '#666';
+            ctx.translate(15, height / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.textAlign = 'center';
+            ctx.fillText('Pressure (hPa)', 0, 0);
+            ctx.restore();
+
+            // Update legend
+            const legendContainer = document.getElementById('legend');
+            legendContainer.innerHTML = STATIONS.map(station => `
+                <div class="legend-item">
+                    <div class="legend-color" style="background: ${station.color};"></div>
+                    <span>${station.name}</span>
+                </div>
+            `).join('');
+        }
+
+        // Fetch data from a single station
+        async function fetchStation(station) {
+            try {
+                const response = await fetch(station.url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return {
+                    id: station.id,
+                    ...data.observations
+                };
+            } catch (error) {
+                console.error(`Failed to fetch ${station.name}:`, error);
+                return { id: station.id, error: error.message };
+            }
+        }
+
+        // Load all station data
+        async function loadAllData() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+
+            document.getElementById('errorContainer').innerHTML = '';
+
+            try {
+                const results = await Promise.all(STATIONS.map(fetchStation));
+
+                let errors = [];
+                results.forEach(result => {
+                    if (result.error) {
+                        errors.push(result.id);
+                    } else {
+                        stationData[result.id] = result;
+                    }
+                });
+
+                if (errors.length > 0 && errors.length < STATIONS.length) {
+                    document.getElementById('errorContainer').innerHTML =
+                        `<div class="error">Some stations unavailable. Data may be incomplete.</div>`;
+                } else if (errors.length === STATIONS.length) {
+                    document.getElementById('errorContainer').innerHTML =
+                        `<div class="error">Unable to fetch BOM data. Try running via local server: python3 server.py</div>`;
+                }
+
+                drawPressureChart(stationData);
+                updateLastRefresh();
+
+            } catch (error) {
+                document.getElementById('errorContainer').innerHTML =
+                    `<div class="error">Error loading data: ${error.message}</div>`;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Refresh';
+        }
+
+        // Update last refresh time
+        function updateLastRefresh() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-AU', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            document.getElementById('lastUpdate').textContent = `Updated ${timeStr}`;
+        }
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            if (Object.keys(stationData).length > 0) {
+                drawPressureChart(stationData);
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', loadAllData);
+    </script>
+</body>
+</html>
