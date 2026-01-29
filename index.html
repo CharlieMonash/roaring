@@ -240,7 +240,7 @@
             map = L.map('map', {
                 zoomControl: true,
                 scrollWheelZoom: true
-            }).setView([-43.0, 147.0], 9);
+            }).setView([-42.95, 147.2], 10);  // Centered on Hobart area, zoomed in
 
             // Use CartoDB Positron for a clean, muted look
             L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -400,8 +400,6 @@
             Object.values(markers).forEach(m => map.removeLayer(m));
             markers = {};
 
-            const bounds = [];
-
             Object.entries(stationData).forEach(([id, data]) => {
                 if (!data.data || data.data.length === 0) return;
 
@@ -409,14 +407,9 @@
                 if (marker) {
                     marker.addTo(map);
                     markers[id] = marker;
-                    bounds.push(marker.getLatLng());
                 }
             });
-
-            // Fit map to show all markers
-            if (bounds.length > 0) {
-                map.fitBounds(bounds, { padding: [50, 50] });
-            }
+            // Don't auto-fit bounds - keep user's current zoom/pan
         }
 
         // Navigate to station detail
