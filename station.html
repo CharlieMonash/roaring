@@ -489,15 +489,24 @@
                 }
             });
 
-            // Draw X-axis labels
+            // Draw X-axis labels - adaptive based on chart width
             ctx.fillStyle = '#666';
             ctx.font = '11px -apple-system, sans-serif';
             ctx.textAlign = 'center';
 
             const labels = options.labels || [];
-            const labelStep = Math.ceil(labels.length / 8);
+            // Show fewer labels on narrow screens (aim for ~4-6 labels max)
+            const maxLabels = Math.max(4, Math.floor(chartWidth / 60));
+            const labelStep = Math.max(1, Math.ceil(labels.length / maxLabels));
+
             labels.forEach((label, i) => {
-                if (i % labelStep !== 0 && i !== labels.length - 1) return;
+                // Show first, last, and evenly spaced labels
+                const isFirst = i === 0;
+                const isLast = i === labels.length - 1;
+                const isStep = i % labelStep === 0;
+
+                if (!isFirst && !isLast && !isStep) return;
+
                 const x = padding.left + (chartWidth / (labels.length - 1)) * i;
                 ctx.fillText(label, x, height - padding.bottom + 20);
             });
