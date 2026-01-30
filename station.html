@@ -90,8 +90,16 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(3, 1fr);
             gap: 1.5rem;
+        }
+
+        @media (max-width: 600px) {
+            .current-conditions {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 1rem;
+                padding: 1rem;
+            }
         }
 
         .condition-item {
@@ -268,8 +276,10 @@
                 <div class="condition-value" id="windDir">--</div>
             </div>
             <div class="condition-item">
-                <div class="condition-label">Temperature</div>
-                <div class="condition-value" id="airTemp">--</div>
+                <a href="temperature.html" class="condition-link">
+                    <div class="condition-label">Temperature</div>
+                    <div class="condition-value" id="airTemp">--</div>
+                </a>
             </div>
             <div class="condition-item">
                 <a href="pressure.html" class="condition-link">
@@ -278,8 +288,10 @@
                 </a>
             </div>
             <div class="condition-item">
-                <div class="condition-label">Humidity</div>
-                <div class="condition-value" id="humidity">--</div>
+                <a href="humidity.html" class="condition-link">
+                    <div class="condition-label">Humidity</div>
+                    <div class="condition-value" id="humidity">--</div>
+                </a>
             </div>
         </div>
 
