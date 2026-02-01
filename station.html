@@ -291,6 +291,25 @@
             margin-bottom: 1rem;
         }
 
+        .stale-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .stale-warning svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
         footer {
             text-align: center;
             padding: 2rem;
@@ -317,6 +336,13 @@
 
     <main>
         <div id="errorContainer"></div>
+        <div id="staleWarning" class="stale-warning" style="display: none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12,6 12,12 16,14"/>
+            </svg>
+            <span>Data may be outdated. Last update: <span id="staleTime">--</span></span>
+        </div>
 
         <div class="conditions-wrapper">
             <button class="info-toggle" id="infoToggle" aria-expanded="false">
@@ -476,6 +502,35 @@
                 minute: '2-digit',
                 hour12: false
             });
+        }
+
+        // Check if data is stale and show/hide warning
+        function checkAndShowStaleWarning(data) {
+            const latest = data[0];
+            if (!latest || !latest.local_date_time_full) return;
+
+            const dataTime = parseDateTime(latest.local_date_time_full);
+            const now = new Date();
+            const diffMinutes = Math.floor((now - dataTime) / (1000 * 60));
+
+            const warningEl = document.getElementById('staleWarning');
+            const staleTimeEl = document.getElementById('staleTime');
+
+            if (diffMinutes > 30) {
+                // Format the time ago
+                let timeAgo;
+                if (diffMinutes < 60) {
+                    timeAgo = `${diffMinutes} minutes ago`;
+                } else {
+                    const hours = Math.floor(diffMinutes / 60);
+                    const mins = diffMinutes % 60;
+                    timeAgo = hours === 1 ? `1 hour${mins > 0 ? ` ${mins} min` : ''} ago` : `${hours} hours ago`;
+                }
+                staleTimeEl.textContent = timeAgo;
+                warningEl.style.display = 'flex';
+            } else {
+                warningEl.style.display = 'none';
+            }
         }
 
         // Draw a line chart
@@ -758,6 +813,7 @@
                     STATION_NAMES[stationId] || json.observations.header[0].name;
 
                 updateCurrentConditions(chartData);
+                checkAndShowStaleWarning(chartData);
                 drawCharts(chartData);
                 updateLastRefresh();
 

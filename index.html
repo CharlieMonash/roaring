@@ -119,6 +119,15 @@
             height: 100%;
         }
 
+        .wind-marker.stale {
+            background: rgba(200, 200, 200, 0.9);
+            opacity: 0.7;
+        }
+
+        .wind-marker.stale .wind-marker-speed {
+            color: #888;
+        }
+
         .error {
             background: #fee;
             border: 1px solid #fcc;
@@ -250,6 +259,25 @@
             }).addTo(map);
         }
 
+        // Parse BOM datetime format (YYYYMMDDHHmmss)
+        function parseDateTime(dtStr) {
+            const year = parseInt(dtStr.slice(0, 4));
+            const month = parseInt(dtStr.slice(4, 6)) - 1;
+            const day = parseInt(dtStr.slice(6, 8));
+            const hour = parseInt(dtStr.slice(8, 10));
+            const minute = parseInt(dtStr.slice(10, 12));
+            return new Date(year, month, day, hour, minute);
+        }
+
+        // Check if data is stale (older than 30 minutes)
+        function isDataStale(dtStr) {
+            if (!dtStr) return true;
+            const dataTime = parseDateTime(dtStr);
+            const now = new Date();
+            const diffMinutes = (now - dataTime) / (1000 * 60);
+            return diffMinutes > 30;
+        }
+
         // Convert wind direction to degrees
         function windDirToDegrees(dir) {
             const directions = {
@@ -295,11 +323,18 @@
 
             if (!coords.lat || !coords.lon) return null;
 
+            // Check if data is stale (>20 minutes old)
+            const stale = isDataStale(latest.local_date_time_full);
+
             const windDir = latest.wind_dir || '';
             let displayValue = '';
             let showArrow = true;
 
-            if (displayMode === 'wind') {
+            if (stale) {
+                // Stale data - show "--" but keep marker clickable
+                displayValue = '--';
+                showArrow = false;
+            } else if (displayMode === 'wind') {
                 displayValue = latest.wind_spd_kt !== null ? `${latest.wind_spd_kt}kt` : '--';
             } else if (displayMode === 'gusts') {
                 displayValue = latest.gust_kt !== null ? `${latest.gust_kt}kt` : '--';
@@ -308,8 +343,13 @@
                 showArrow = false;
             }
 
+            // Show arrow for wind/gusts modes when not stale
+            if (!stale && (displayMode === 'wind' || displayMode === 'gusts')) {
+                showArrow = true;
+            }
+
             const html = `
-                <div class="wind-marker" onclick="goToStation('${id}')">
+                <div class="wind-marker${stale ? ' stale' : ''}" onclick="goToStation('${id}')">
                     <div class="wind-marker-data">
                         ${showArrow ? `<div class="wind-marker-arrow">${createWindArrowSVG(latest.wind_dir, latest.wind_spd_kt)}</div>` : ''}
                         <span class="wind-marker-speed">${displayValue}</span>

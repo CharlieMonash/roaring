@@ -90,11 +90,45 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
         .chart-title {
             font-size: 1rem;
             font-weight: 500;
-            margin-bottom: 1rem;
             color: #1a1a1a;
+        }
+
+        .time-range-btns {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .time-range-btn {
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            padding: 0.35rem 0.75rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: #666;
+            transition: all 0.15s;
+        }
+
+        .time-range-btn:hover {
+            background: #eee;
+        }
+
+        .time-range-btn.active {
+            background: #333;
+            color: #fff;
+            border-color: #333;
         }
 
         .chart-canvas {
@@ -148,7 +182,7 @@
 <body>
     <header>
         <div class="header-left">
-            <a href="index.html" class="back-link">←</a>
+            <a href="#" class="back-link" onclick="history.back(); return false;">←</a>
             <h1>Temperature</h1>
         </div>
         <div class="header-info">
@@ -161,7 +195,14 @@
         <div id="errorContainer"></div>
 
         <div class="chart-container">
-            <div class="chart-title">All Stations</div>
+            <div class="chart-header">
+                <div class="chart-title">All Stations</div>
+                <div class="time-range-btns">
+                    <button class="time-range-btn" data-hours="3">3h</button>
+                    <button class="time-range-btn active" data-hours="6">6h</button>
+                    <button class="time-range-btn" data-hours="12">12h</button>
+                </div>
+            </div>
             <canvas id="tempChart" class="chart-canvas"></canvas>
             <div class="legend" id="legend"></div>
         </div>
@@ -189,6 +230,7 @@
         ];
 
         let stationData = {};
+        let selectedHours = 6; // Default to 6 hours
 
         function parseDateTime(dtStr) {
             const year = parseInt(dtStr.slice(0, 4));
@@ -228,10 +270,11 @@
             const allTemps = [];
             let maxDataPoints = 0;
             let timeLabels = [];
+            const dataPoints = selectedHours * 6; // 6 readings per hour (10-min intervals)
 
             Object.entries(allData).forEach(([id, data]) => {
                 if (!data.data) return;
-                const reversed = [...data.data].reverse().slice(-72);
+                const reversed = [...data.data].reverse().slice(-dataPoints);
                 if (reversed.length > maxDataPoints) {
                     maxDataPoints = reversed.length;
                     timeLabels = reversed.map(d => formatTime(parseDateTime(d.local_date_time_full)));
@@ -272,7 +315,7 @@
                 const data = allData[station.id];
                 if (!data || !data.data) return;
 
-                const reversed = [...data.data].reverse().slice(-72);
+                const reversed = [...data.data].reverse().slice(-dataPoints);
                 const temps = reversed.map(d => d.air_temp);
 
                 ctx.strokeStyle = station.color;
@@ -399,7 +442,25 @@
             }
         });
 
-        document.addEventListener('DOMContentLoaded', loadAllData);
+        // Handle time range button clicks
+        function setupTimeRangeButtons() {
+            const buttons = document.querySelectorAll('.time-range-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    buttons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedHours = parseInt(btn.dataset.hours);
+                    if (Object.keys(stationData).length > 0) {
+                        drawTempChart(stationData);
+                    }
+                });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setupTimeRangeButtons();
+            loadAllData();
+        });
     </script>
 </body>
 </html>
