@@ -144,6 +144,62 @@
             color: #2a9d8f;
         }
 
+        .info-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.75rem;
+            color: #888;
+            cursor: pointer;
+            padding: 0.5rem 0;
+            margin-bottom: 0.5rem;
+            border: none;
+            background: none;
+            transition: color 0.15s;
+        }
+
+        .info-toggle:hover {
+            color: #333;
+        }
+
+        .info-toggle svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .info-panel {
+            display: none;
+            background: #f9f9f9;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .info-panel.open {
+            display: block;
+        }
+
+        .info-panel dl {
+            margin: 0;
+        }
+
+        .info-panel dt {
+            font-weight: 600;
+            color: #333;
+            margin-top: 0.75rem;
+        }
+
+        .info-panel dt:first-child {
+            margin-top: 0;
+        }
+
+        .info-panel dd {
+            margin: 0.25rem 0 0 0;
+        }
+
         .chart-container {
             background: #fff;
             border-radius: 8px;
@@ -262,36 +318,66 @@
     <main>
         <div id="errorContainer"></div>
 
-        <div class="current-conditions" id="currentConditions">
-            <div class="condition-item">
-                <div class="condition-label">Wind Speed</div>
-                <div class="condition-value" id="windSpeed">--</div>
+        <div class="conditions-wrapper">
+            <button class="info-toggle" id="infoToggle" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="16" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                <span>What do these mean?</span>
+            </button>
+
+            <div class="info-panel" id="infoPanel">
+                <dl>
+                    <dt>Wind Speed</dt>
+                    <dd>Average wind speed over the past 10 minutes, measured in knots.</dd>
+
+                    <dt>Gusts</dt>
+                    <dd>Highest wind gust in the past 30 minutes, measured over 3 seconds.</dd>
+
+                    <dt>Direction</dt>
+                    <dd>Wind direction over the past 10 minutes. Shown as one of 16 compass points, indicating where the wind is blowing from (relative to True North).</dd>
+
+                    <dt>Pressure</dt>
+                    <dd>Mean sea level pressure (MSLP) in hectopascals. The weight of the atmosphere above a point, reduced to sea level.</dd>
+
+                    <dt>Humidity</dt>
+                    <dd>Relative humidity. The amount of moisture in the air as a percentage of the maximum it can hold at that temperature.</dd>
+                </dl>
             </div>
-            <div class="condition-item">
-                <div class="condition-label">Gusts</div>
-                <div class="condition-value" id="gustSpeed">--</div>
-            </div>
-            <div class="condition-item">
-                <div class="condition-label">Direction</div>
-                <div class="condition-value" id="windDir">--</div>
-            </div>
-            <div class="condition-item">
-                <a href="temperature.html" class="condition-link">
-                    <div class="condition-label">Temperature</div>
-                    <div class="condition-value" id="airTemp">--</div>
-                </a>
-            </div>
-            <div class="condition-item">
-                <a href="pressure.html" class="condition-link">
-                    <div class="condition-label">Pressure</div>
-                    <div class="condition-value" id="pressure">--</div>
-                </a>
-            </div>
-            <div class="condition-item">
-                <a href="humidity.html" class="condition-link">
-                    <div class="condition-label">Humidity</div>
-                    <div class="condition-value" id="humidity">--</div>
-                </a>
+
+            <div class="current-conditions" id="currentConditions">
+                <div class="condition-item">
+                    <div class="condition-label">Wind Speed</div>
+                    <div class="condition-value" id="windSpeed">--</div>
+                </div>
+                <div class="condition-item">
+                    <div class="condition-label">Gusts</div>
+                    <div class="condition-value" id="gustSpeed">--</div>
+                </div>
+                <div class="condition-item">
+                    <div class="condition-label">Direction</div>
+                    <div class="condition-value" id="windDir">--</div>
+                </div>
+                <div class="condition-item">
+                    <a href="temperature.html" class="condition-link">
+                        <div class="condition-label">Temperature</div>
+                        <div class="condition-value" id="airTemp">--</div>
+                    </a>
+                </div>
+                <div class="condition-item">
+                    <a href="pressure.html" class="condition-link">
+                        <div class="condition-label">Pressure</div>
+                        <div class="condition-value" id="pressure">--</div>
+                    </a>
+                </div>
+                <div class="condition-item">
+                    <a href="humidity.html" class="condition-link">
+                        <div class="condition-label">Humidity</div>
+                        <div class="condition-value" id="humidity">--</div>
+                    </a>
+                </div>
             </div>
         </div>
 
@@ -621,6 +707,17 @@
 
         }
 
+        // Handle info panel toggle
+        function setupInfoToggle() {
+            const toggle = document.getElementById('infoToggle');
+            const panel = document.getElementById('infoPanel');
+
+            toggle.addEventListener('click', () => {
+                const isOpen = panel.classList.toggle('open');
+                toggle.setAttribute('aria-expanded', isOpen);
+            });
+        }
+
         // Handle time range button clicks
         function setupTimeRangeButtons() {
             const buttons = document.querySelectorAll('.time-range-btn');
@@ -702,6 +799,7 @@
             }
 
             document.getElementById('stationName').textContent = STATION_NAMES[stationId] || 'Loading...';
+            setupInfoToggle();
             setupTimeRangeButtons();
             loadData();
 
