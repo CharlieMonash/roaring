@@ -180,6 +180,149 @@
         .leaflet-tile {
             filter: saturate(0.3) brightness(1.05);
         }
+
+        /* Mini 3h charts */
+        .mini-chart {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .mini-chart text {
+            font-size: 9px;
+            fill: #999;
+            font-family: inherit;
+        }
+
+        .recent-section {
+            margin-top: 1.5rem;
+        }
+
+        .recent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .recent-title {
+            font-size: 1rem;
+            font-weight: 500;
+            color: #1a1a1a;
+        }
+
+        .recent-legend {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        .recent-legend span::before {
+            content: '';
+            display: inline-block;
+            width: 12px;
+            height: 3px;
+            border-radius: 2px;
+            margin-right: 5px;
+            vertical-align: middle;
+            background: var(--swatch);
+        }
+
+        .station-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 1rem;
+        }
+
+        .station-card {
+            display: block;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 0.75rem 0.75rem 0.5rem;
+            color: inherit;
+            text-decoration: none;
+            transition: box-shadow 0.15s;
+        }
+
+        .station-card:hover {
+            box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+        }
+
+        .card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .card-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .card-now {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .card-now .gust {
+            font-weight: 400;
+            color: #888;
+        }
+
+        .card-now .wind-marker-arrow {
+            width: 16px;
+            height: 16px;
+        }
+
+        .card-empty {
+            font-size: 0.8rem;
+            color: #999;
+            padding: 1.5rem 0;
+            text-align: center;
+        }
+
+        .station-card.stale .card-now {
+            color: #999;
+        }
+
+        /* Desktop hover tooltip */
+        .leaflet-tooltip.mini-tooltip {
+            width: 280px;
+            padding: 0.5rem 0.6rem 0.25rem;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.25);
+            white-space: normal;
+        }
+
+        .mini-tooltip .card-head {
+            margin-bottom: 0.15rem;
+        }
+
+        @media (max-width: 600px) {
+            header {
+                padding: 0.75rem 1rem;
+            }
+
+            main {
+                margin: 1rem auto;
+                padding: 0 1rem;
+            }
+
+            #map {
+                height: 380px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -203,6 +346,18 @@
         <div class="map-container">
             <div id="map"></div>
         </div>
+
+        <section class="recent-section">
+            <div class="recent-header">
+                <h2 class="recent-title">Last 3 hours</h2>
+                <div class="recent-legend">
+                    <span style="--swatch: #e63946">Speed</span>
+                    <span style="--swatch: #bbb">Gusts</span>
+                    <span style="--swatch: #457b9d">Direction</span>
+                </div>
+            </div>
+            <div class="station-grid" id="stationGrid"></div>
+        </section>
     </main>
 
     <footer>
@@ -444,11 +599,146 @@
 
                 const marker = createMarker(id, data);
                 if (marker) {
+                    // Hover preview on devices with a mouse; touch users get the cards below
+                    if (canHover) {
+                        const { html, stale } = buildStationSummary(id, data);
+                        if (!stale) {
+                            marker.bindTooltip(html, {
+                                direction: 'top',
+                                offset: [0, -16],
+                                opacity: 1,
+                                className: 'mini-tooltip'
+                            });
+                        }
+                    }
                     marker.addTo(map);
                     markers[id] = marker;
                 }
             });
+            updateStationGrid();
             // Don't auto-fit bounds - keep user's current zoom/pan
+        }
+
+        const CHART_HOURS = 3;
+        const canHover = window.matchMedia('(hover: hover)').matches;
+
+        function formatHM(date) {
+            return date.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+        }
+
+        // Observations from the last CHART_HOURS hours, oldest first
+        function recentObservations(data) {
+            const obs = data.data.filter(d => d.local_date_time_full);
+            if (obs.length === 0) return [];
+            const newest = parseDateTime(obs[0].local_date_time_full);
+            const cutoff = newest.getTime() - CHART_HOURS * 3600 * 1000;
+            return obs
+                .map(d => ({ ...d, t: parseDateTime(d.local_date_time_full).getTime() }))
+                .filter(d => d.t >= cutoff)
+                .reverse();
+        }
+
+        // Small SVG chart: speed + gust lines, direction arrows along the top
+        function buildMiniChart(points) {
+            if (points.length < 2) {
+                return `<div class="card-empty">Not enough recent data</div>`;
+            }
+
+            const W = 300, H = 120;
+            const left = 22, right = 8, top = 26, bottom = 100;
+            const t0 = points[0].t, t1 = points[points.length - 1].t;
+            const maxVal = Math.max(10, ...points.map(p => Math.max(p.gust_kt ?? 0, p.wind_spd_kt ?? 0)));
+            const yMax = Math.ceil(maxVal / 10) * 10;
+
+            const x = t => left + ((t - t0) / (t1 - t0)) * (W - left - right);
+            const y = v => bottom - (v / yMax) * (bottom - top);
+
+            // Line path that breaks at missing values
+            const linePath = key => {
+                let d = '', pen = false;
+                points.forEach(p => {
+                    const v = p[key];
+                    if (v === null || v === undefined) { pen = false; return; }
+                    d += `${pen ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(v).toFixed(1)}`;
+                    pen = true;
+                });
+                return d;
+            };
+
+            // Grid lines + y labels at 0, half, max
+            let grid = '';
+            [0, yMax / 2, yMax].forEach(v => {
+                grid += `<line x1="${left}" x2="${W - right}" y1="${y(v)}" y2="${y(v)}" stroke="#eee" stroke-width="1"/>`;
+                grid += `<text x="${left - 4}" y="${y(v) + 3}" text-anchor="end">${v}</text>`;
+            });
+
+            // Direction arrows, newest first, skipping any too close to the last one drawn
+            // (BOM readings are irregular: half-hourly, with 10-minute bursts)
+            const minGap = 24;
+            let arrows = '', lastX = Infinity;
+            for (let i = points.length - 1; i >= 0; i--) {
+                const p = points[i];
+                if (lastX - x(p.t) < minGap) continue;
+                lastX = x(p.t);
+                const deg = windDirToDegrees(p.wind_dir);
+                const cx = x(p.t).toFixed(1);
+                if (deg === null || !p.wind_spd_kt) {
+                    arrows += `<circle cx="${cx}" cy="11" r="3" fill="none" stroke="#bbb" stroke-width="1.5"/>`;
+                } else {
+                    arrows += `<g transform="translate(${cx},11) rotate(${deg})">
+                        <line x1="0" y1="-7" x2="0" y2="7" stroke="#457b9d" stroke-width="2" stroke-linecap="round"/>
+                        <polyline points="-4,3 0,7 4,3" fill="none" stroke="#457b9d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </g>`;
+                }
+            }
+
+            // Time labels: start, middle, end
+            const tMid = t0 + (t1 - t0) / 2;
+            const timeLabels = `
+                <text x="${left}" y="${H - 6}" text-anchor="start">${formatHM(new Date(t0))}</text>
+                <text x="${x(tMid)}" y="${H - 6}" text-anchor="middle">${formatHM(new Date(tMid))}</text>
+                <text x="${W - right}" y="${H - 6}" text-anchor="end">${formatHM(new Date(t1))}</text>`;
+
+            return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wind speed, gusts and direction over the last ${CHART_HOURS} hours">
+                ${grid}
+                <path d="${linePath('gust_kt')}" fill="none" stroke="#bbb" stroke-width="1.5" stroke-linejoin="round"/>
+                <path d="${linePath('wind_spd_kt')}" fill="none" stroke="#e63946" stroke-width="2" stroke-linejoin="round"/>
+                ${arrows}
+                ${timeLabels}
+            </svg>`;
+        }
+
+        // Name + current reading row shared by cards and tooltips
+        function buildCardHead(id, latest, stale) {
+            const name = STATIONS.find(s => s.id === id)?.name ?? id;
+            let now;
+            if (stale) {
+                now = 'No recent data';
+            } else {
+                const spd = latest.wind_spd_kt ?? '--';
+                const gust = latest.gust_kt !== null ? `<span class="gust">G${latest.gust_kt}</span>` : '';
+                now = `<div class="wind-marker-arrow">${createWindArrowSVG(latest.wind_dir, latest.wind_spd_kt)}</div>${spd}kt ${gust}`;
+            }
+            return `<div class="card-head"><span class="card-name">${name}</span><span class="card-now">${now}</span></div>`;
+        }
+
+        function buildStationSummary(id, data) {
+            const latest = data.data[0];
+            const stale = isDataStale(latest.local_date_time_full);
+            const chart = stale ? '' : buildMiniChart(recentObservations(data));
+            return { html: buildCardHead(id, latest, stale) + chart, stale };
+        }
+
+        // Cards below the map, in station order
+        function updateStationGrid() {
+            const grid = document.getElementById('stationGrid');
+            grid.innerHTML = STATIONS
+                .filter(s => stationData[s.id]?.data?.length)
+                .map(s => {
+                    const { html, stale } = buildStationSummary(s.id, stationData[s.id]);
+                    return `<a class="station-card${stale ? ' stale' : ''}" href="station.html?id=${s.id}">${html}</a>`;
+                })
+                .join('');
         }
 
         // Navigate to station detail
