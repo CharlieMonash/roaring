@@ -593,6 +593,7 @@
             // Clear existing markers
             Object.values(markers).forEach(m => map.removeLayer(m));
             markers = {};
+            const yMax = sharedYMax();
 
             Object.entries(stationData).forEach(([id, data]) => {
                 if (!data.data || data.data.length === 0) return;
@@ -601,7 +602,7 @@
                 if (marker) {
                     // Hover preview on devices with a mouse; touch users get the cards below
                     if (canHover) {
-                        const { html, stale } = buildStationSummary(id, data);
+                        const { html, stale } = buildStationSummary(id, data, yMax);
                         if (!stale) {
                             marker.bindTooltip(html, {
                                 direction: 'top',
@@ -615,7 +616,7 @@
                     markers[id] = marker;
                 }
             });
-            updateStationGrid();
+            updateStationGrid(yMax);
             // Don't auto-fit bounds - keep user's current zoom/pan
         }
 
@@ -638,8 +639,23 @@
                 .reverse();
         }
 
+        // One knots scale for every chart on the page so they can be compared at a glance:
+        // 0–20kt by default, stepping up in 10s if any station's recent speed or gust goes higher
+        const DEFAULT_Y_MAX = 20;
+
+        function sharedYMax() {
+            let maxVal = 0;
+            Object.values(stationData).forEach(data => {
+                if (!data.data?.length || isDataStale(data.data[0].local_date_time_full)) return;
+                recentObservations(data).forEach(p => {
+                    maxVal = Math.max(maxVal, p.gust_kt ?? 0, p.wind_spd_kt ?? 0);
+                });
+            });
+            return Math.max(DEFAULT_Y_MAX, Math.ceil(maxVal / 10) * 10);
+        }
+
         // Small SVG chart: speed + gust lines, direction arrows along the top
-        function buildMiniChart(points) {
+        function buildMiniChart(points, yMax) {
             if (points.length < 2) {
                 return `<div class="card-empty">Not enough recent data</div>`;
             }
@@ -647,8 +663,6 @@
             const W = 300, H = 120;
             const left = 22, right = 8, top = 26, bottom = 100;
             const t0 = points[0].t, t1 = points[points.length - 1].t;
-            const maxVal = Math.max(10, ...points.map(p => Math.max(p.gust_kt ?? 0, p.wind_spd_kt ?? 0)));
-            const yMax = Math.ceil(maxVal / 10) * 10;
 
             const x = t => left + ((t - t0) / (t1 - t0)) * (W - left - right);
             const y = v => bottom - (v / yMax) * (bottom - top);
@@ -722,20 +736,20 @@
             return `<div class="card-head"><span class="card-name">${name}</span><span class="card-now">${now}</span></div>`;
         }
 
-        function buildStationSummary(id, data) {
+        function buildStationSummary(id, data, yMax) {
             const latest = data.data[0];
             const stale = isDataStale(latest.local_date_time_full);
-            const chart = stale ? '' : buildMiniChart(recentObservations(data));
+            const chart = stale ? '' : buildMiniChart(recentObservations(data), yMax);
             return { html: buildCardHead(id, latest, stale) + chart, stale };
         }
 
         // Cards below the map, in station order
-        function updateStationGrid() {
+        function updateStationGrid(yMax) {
             const grid = document.getElementById('stationGrid');
             grid.innerHTML = STATIONS
                 .filter(s => stationData[s.id]?.data?.length)
                 .map(s => {
-                    const { html, stale } = buildStationSummary(s.id, stationData[s.id]);
+                    const { html, stale } = buildStationSummary(s.id, stationData[s.id], yMax);
                     return `<a class="station-card${stale ? ' stale' : ''}" href="station.html?id=${s.id}">${html}</a>`;
                 })
                 .join('');
