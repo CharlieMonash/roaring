@@ -26,9 +26,12 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         """Proxy requests to BOM API to avoid CORS issues"""
         try:
             # Extract the station ID from the path
-            # e.g., /bom-proxy/IDT60901.94988.json
+            # e.g., /bom-proxy/IDT60901.94988.json or /bom-proxy/IDT60801.94962.json
             bom_path = self.path.replace('/bom-proxy/', '')
-            bom_url = f'http://www.bom.gov.au/fwo/IDT60901/{bom_path}'
+            product = bom_path.split('.')[0]
+            if product not in ('IDT60901', 'IDT60801'):
+                raise ValueError(f'Unknown BOM product: {product}')
+            bom_url = f'http://www.bom.gov.au/fwo/{product}/{bom_path}'
 
             # Make request to BOM
             req = urllib.request.Request(bom_url, headers={
@@ -60,7 +63,9 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    with socketserver.TCPServer(("", PORT), ProxyHandler) as httpd:
+    # Threaded so the ~49 station requests load in parallel; reuse address so quick restarts work
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    with socketserver.ThreadingTCPServer(("", PORT), ProxyHandler) as httpd:
         print(f"Hobart Winds server running at http://localhost:{PORT}")
         print("Press Ctrl+C to stop")
         try:

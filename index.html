@@ -181,6 +181,25 @@
             filter: saturate(0.3) brightness(1.05);
         }
 
+        /* Zoomed out: smaller markers so the whole state stays readable */
+        .compact-markers .wind-marker {
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
+        .compact-markers .wind-marker-speed {
+            font-size: 11px;
+        }
+
+        .compact-markers .wind-marker-arrow {
+            width: 12px;
+            height: 12px;
+        }
+
+        .compact-markers .wind-marker-data {
+            gap: 3px;
+        }
+
         /* Mini 3h charts */
         .mini-chart {
             display: block;
@@ -365,34 +384,13 @@
         Updates every 10 minutes
     </footer>
 
+    <script src="stations.js"></script>
     <script>
-        // BOM station data URLs
-        // CONFIGURATION: Set your Cloudflare Worker URL here after deployment
-        const WORKER_URL = 'https://d1-template.charliedixon49.workers.dev/'; // e.g., 'https://roaring-proxy.your-subdomain.workers.dev/'
+        // Station list, BOM_BASE and worker URL live in stations.js
+        const STATIONS = STATION_LIST.map(s => ({ ...s, url: stationUrl(s) }));
 
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const BOM_BASE = isLocalhost ? '/bom-proxy/' : WORKER_URL;
-
-        const STATIONS = [
-            { id: '94988', url: BOM_BASE + 'IDT60901.94988.json', name: 'Dennes Point' },
-            { id: '94970', url: BOM_BASE + 'IDT60901.94970.json', name: 'Hobart' },
-            { id: '94619', url: BOM_BASE + 'IDT60901.94619.json', name: 'Hobart Airport' },
-            { id: '95979', url: BOM_BASE + 'IDT60901.95979.json', name: 'kunanyi' },
-            { id: '94951', url: BOM_BASE + 'IDT60901.94951.json', name: 'Dunalley' },
-            { id: '95986', url: BOM_BASE + 'IDT60901.95986.json', name: 'Tasman Is.' },
-            { id: '95967', url: BOM_BASE + 'IDT60901.95967.json', name: 'Cape Bruny' }
-        ];
-
-        // Verified coordinates for each station
-        const FALLBACK_COORDS = {
-            '94988': { lat: -43.1833, lon: 147.3667 },  // Dennes Point - North Bruny Island
-            '94970': { lat: -42.8897, lon: 147.3253 },  // Hobart (Ellerslie Road) - central Hobart
-            '94619': { lat: -42.8367, lon: 147.5042 },  // Hobart Airport - east of city near Cambridge
-            '95979': { lat: -42.8950, lon: 147.2408 },  // kunanyi/Mt Wellington - summit west of Hobart
-            '94951': { lat: -42.90, lon: 147.79 },      // Dunalley (Stroud Point) - Forestier Peninsula neck
-            '95986': { lat: -43.24, lon: 148.00 },      // Tasman Island - off Tasman Peninsula
-            '95967': { lat: -43.4886, lon: 147.1444 }   // Cape Bruny - southern tip of Bruny Island
-        };
+        // Verified coordinates for each station - the feeds' lat/lon are only to 1 decimal place
+        const FALLBACK_COORDS = Object.fromEntries(STATION_LIST.map(s => [s.id, { lat: s.lat, lon: s.lon }]));
 
         let stationData = {};
         let map = null;
@@ -411,6 +409,14 @@
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 maxZoom: 19
             }).addTo(map);
+
+            // Smaller markers when zoomed out so the whole state stays readable
+            const updateCompact = () => map.getContainer().classList.toggle('compact-markers', map.getZoom() <= 8);
+            updateCompact();
+            map.on('zoomend', updateCompact);
+
+            // Cards and chart scale follow whatever part of the map is on screen
+            map.on('moveend', updateStationGrid);
         }
 
         // Parse BOM datetime format (YYYYMMDDHHmmss)
@@ -532,8 +538,9 @@
             updateMap();
         }
 
-        // Fetch data from a single station
-        async function fetchStation(station) {
+        // Fetch data from a single station, retrying once - BOM occasionally times out
+        // when many stations are requested at the same moment
+        async function fetchStation(station, retry = true) {
             try {
                 const response = await fetch(station.url);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -543,6 +550,10 @@
                     ...data.observations
                 };
             } catch (error) {
+                if (retry) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    return fetchStation(station, false);
+                }
                 console.error(`Failed to fetch ${station.name}:`, error);
                 return { id: station.id, error: error.message };
             }
@@ -557,7 +568,18 @@
             document.getElementById('errorContainer').innerHTML = '';
 
             try {
-                const results = await Promise.all(STATIONS.map(fetchStation));
+                // Fetch everything at once, but draw the original Hobart-area stations as soon as
+                // they arrive so a slow remote station never holds up the default view
+                const storeResults = rs => rs.forEach(r => { if (!r.error) stationData[r.id] = r; });
+                const homeFetch = Promise.all(STATIONS.filter(s => s.home).map(fetchStation));
+                const otherFetch = Promise.all(STATIONS.filter(s => !s.home).map(fetchStation));
+
+                const homeResults = await homeFetch;
+                storeResults(homeResults);
+                updateMap();
+                updateLastRefresh();
+
+                const results = [...homeResults, ...await otherFetch];
 
                 let errors = [];
                 results.forEach(result => {
@@ -568,7 +590,10 @@
                     }
                 });
 
-                if (errors.length > 0 && errors.length < STATIONS.length) {
+                // Remote stations drop out fairly often, so only warn when one of the
+                // original Hobart-area stations is missing (or everything failed)
+                const homeErrors = errors.filter(id => findStation(id)?.home);
+                if (homeErrors.length > 0 && errors.length < STATIONS.length) {
                     document.getElementById('errorContainer').innerHTML =
                         `<div class="error">Some stations unavailable. Data may be incomplete.</div>`;
                 } else if (errors.length === STATIONS.length) {
@@ -593,30 +618,27 @@
             // Clear existing markers
             Object.values(markers).forEach(m => map.removeLayer(m));
             markers = {};
-            const yMax = sharedYMax();
 
             Object.entries(stationData).forEach(([id, data]) => {
                 if (!data.data || data.data.length === 0) return;
 
                 const marker = createMarker(id, data);
                 if (marker) {
-                    // Hover preview on devices with a mouse; touch users get the cards below
-                    if (canHover) {
-                        const { html, stale } = buildStationSummary(id, data, yMax);
-                        if (!stale) {
-                            marker.bindTooltip(html, {
-                                direction: 'top',
-                                offset: [0, -16],
-                                opacity: 1,
-                                className: 'mini-tooltip'
-                            });
-                        }
+                    // Hover preview on devices with a mouse; touch users get the cards below.
+                    // Built on hover so it uses the scale for the current map view.
+                    if (canHover && !isDataStale(data.data[0].local_date_time_full)) {
+                        marker.bindTooltip(() => buildStationSummary(id, data, sharedYMax()).html, {
+                            direction: 'top',
+                            offset: [0, -16],
+                            opacity: 1,
+                            className: 'mini-tooltip'
+                        });
                     }
                     marker.addTo(map);
                     markers[id] = marker;
                 }
             });
-            updateStationGrid(yMax);
+            updateStationGrid();
             // Don't auto-fit bounds - keep user's current zoom/pan
         }
 
@@ -639,14 +661,21 @@
                 .reverse();
         }
 
-        // One knots scale for every chart on the page so they can be compared at a glance:
-        // 0–20kt by default, stepping up in 10s if any station's recent speed or gust goes higher
+        // Stations whose marker is inside the current map view, in STATIONS order
+        function stationsInView() {
+            const bounds = map.getBounds();
+            return STATIONS.filter(s => stationData[s.id]?.data?.length && bounds.contains([s.lat, s.lon]));
+        }
+
+        // One knots scale for every chart in view so they can be compared at a glance:
+        // 0–20kt by default, stepping up in 10s if any visible station's recent speed or gust goes higher
         const DEFAULT_Y_MAX = 20;
 
         function sharedYMax() {
             let maxVal = 0;
-            Object.values(stationData).forEach(data => {
-                if (!data.data?.length || isDataStale(data.data[0].local_date_time_full)) return;
+            stationsInView().forEach(s => {
+                const data = stationData[s.id];
+                if (isDataStale(data.data[0].local_date_time_full)) return;
                 recentObservations(data).forEach(p => {
                     maxVal = Math.max(maxVal, p.gust_kt ?? 0, p.wind_spd_kt ?? 0);
                 });
@@ -743,11 +772,16 @@
             return { html: buildCardHead(id, latest, stale) + chart, stale };
         }
 
-        // Cards below the map, in station order
-        function updateStationGrid(yMax) {
+        // Cards below the map for the stations in view, in station order
+        function updateStationGrid() {
             const grid = document.getElementById('stationGrid');
-            grid.innerHTML = STATIONS
-                .filter(s => stationData[s.id]?.data?.length)
+            const visible = stationsInView();
+            if (visible.length === 0) {
+                grid.innerHTML = `<div class="card-empty" style="grid-column: 1 / -1">No stations in this part of the map</div>`;
+                return;
+            }
+            const yMax = sharedYMax();
+            grid.innerHTML = visible
                 .map(s => {
                     const { html, stale } = buildStationSummary(s.id, stationData[s.id], yMax);
                     return `<a class="station-card${stale ? ' stale' : ''}" href="station.html?id=${s.id}">${html}</a>`;

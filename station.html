@@ -440,34 +440,9 @@
         Updates every 10 minutes
     </footer>
 
+    <script src="stations.js"></script>
     <script>
-        // Station URLs
-        // Use local proxy when running on localhost, direct BOM URLs otherwise
-        // CONFIGURATION: Set your Cloudflare Worker URL here after deployment
-        const WORKER_URL = 'https://d1-template.charliedixon49.workers.dev/'; // e.g., 'https://roaring-proxy.your-subdomain.workers.dev/'
-
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const BOM_BASE = isLocalhost ? '/bom-proxy/' : WORKER_URL;
-
-        const STATION_URLS = {
-            '94988': BOM_BASE + 'IDT60901.94988.json',
-            '94970': BOM_BASE + 'IDT60901.94970.json',
-            '94619': BOM_BASE + 'IDT60901.94619.json',
-            '95979': BOM_BASE + 'IDT60901.95979.json',
-            '94951': BOM_BASE + 'IDT60901.94951.json',
-            '95986': BOM_BASE + 'IDT60901.95986.json',
-            '95967': BOM_BASE + 'IDT60901.95967.json'
-        };
-
-        const STATION_NAMES = {
-            '94988': 'Dennes Point',
-            '94970': 'Hobart (Ellerslie Road)',
-            '94619': 'Hobart Airport',
-            '95979': 'kunanyi (Mt Wellington)',
-            '94951': 'Dunalley',
-            '95986': 'Tasman Island',
-            '95967': 'Cape Bruny'
-        };
+        // Station list, BOM_BASE and worker URL live in stations.js
 
         let stationId = null;
         let chartData = [];
@@ -800,8 +775,9 @@
             document.getElementById('errorContainer').innerHTML = '';
 
             try {
-                const url = STATION_URLS[stationId];
-                if (!url) throw new Error('Unknown station');
+                const station = findStation(stationId);
+                if (!station) throw new Error('Unknown station');
+                const url = stationUrl(station);
 
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -810,7 +786,7 @@
                 chartData = json.observations.data;
 
                 document.getElementById('stationName').textContent =
-                    STATION_NAMES[stationId] || json.observations.header[0].name;
+                    findStation(stationId)?.fullName || json.observations.header[0].name;
 
                 updateCurrentConditions(chartData);
                 checkAndShowStaleWarning(chartData);
@@ -848,13 +824,13 @@
             const params = new URLSearchParams(window.location.search);
             stationId = params.get('id');
 
-            if (!stationId || !STATION_URLS[stationId]) {
+            if (!stationId || !findStation(stationId)) {
                 document.getElementById('errorContainer').innerHTML =
                     '<div class="error">Invalid station ID. <a href="index.html">Return to map</a></div>';
                 return;
             }
 
-            document.getElementById('stationName').textContent = STATION_NAMES[stationId] || 'Loading...';
+            document.getElementById('stationName').textContent = findStation(stationId)?.fullName || 'Loading...';
             setupInfoToggle();
             setupTimeRangeButtons();
             loadData();

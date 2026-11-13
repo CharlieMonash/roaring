@@ -24,19 +24,27 @@ Then open http://localhost:8080 in your browser.
 
 ## Data Sources
 
-All data comes from the Bureau of Meteorology (BOM):
-- Hobart Airport
-- Hobart (Ellerslie Road)
-- kunanyi (Mt Wellington)
-- Cape Bruny
-- Dunalley
-- Tasman Island
-- South Arm
+All data comes from the Bureau of Meteorology (BOM). The map covers every Tasmanian station on
+https://www.bom.gov.au/tas/observations/tasall.shtml (49 stations) apart from the partner-network
+sites (`99xxx` IDs), which have no published coordinates.
 
-Data updates every 10 minutes from BOM.
+- The original 7 Hobart-area stations (Dennes Point, Hobart, Hobart Airport, kunanyi, Dunalley,
+  Tasman Island, Cape Bruny) use the Hobart-area feed:
+  `http://www.bom.gov.au/fwo/IDT60901/IDT60901.{STATION_ID}.json`
+- All other stations use the Tasmania-wide feed:
+  `http://www.bom.gov.au/fwo/IDT60801/IDT60801.{STATION_ID}.json`
+
+Data updates every 10-30 minutes from BOM.
+
+The map opens on the Hobart area; the "Last 3 hours" cards and their shared knots scale follow
+whatever part of the map is on screen.
 
 ## Adding More Stations
 
-To add more stations, find the station ID from BOM and add it to the `STATIONS` array in both `index.html` and `station.html`, plus add a position in `DEFAULT_POSITIONS`.
+1. Add the station to `STATION_LIST` in `stations.js` (used by `index.html` and `station.html`).
+   Take lat/lon from BOM's station list (`/climate/data/lists_by_element/stations.txt`, match on
+   the WMO column) - the feeds only give positions to 1 decimal place.
+2. Add its ID to the matching product list in `worker.js` and redeploy the Worker **before**
+   deploying the site.
 
-BOM station data format: `http://www.bom.gov.au/fwo/IDT60901/IDT60901.{STATION_ID}.json`
+The temperature / humidity / pressure comparison pages keep their own 7-station lists.

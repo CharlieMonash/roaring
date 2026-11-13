@@ -20,22 +20,18 @@ You'll deploy two things:
 7. Click **Save and Deploy**
 8. Note your worker URL - it will look like: `https://roaring-proxy.YOUR-SUBDOMAIN.workers.dev`
 
-## Step 3: Update Your HTML Files
+## Step 3: Update the Worker URL
 
-In each of these files, find the line:
-```javascript
-const WORKER_URL = 'YOUR_WORKER_URL_HERE';
-```
+Set `WORKER_URL` (include the trailing slash) in:
+- `stations.js` - used by `index.html` and `station.html`
+- `temperature.html`, `humidity.html`, `pressure.html`
 
-Replace `YOUR_WORKER_URL_HERE` with your actual worker URL (include trailing slash):
 ```javascript
 const WORKER_URL = 'https://roaring-proxy.YOUR-SUBDOMAIN.workers.dev/';
 ```
 
-Files to update:
-- `index.html`
-- `station.html`
-- `pressure.html`
+**Order matters when adding stations:** redeploy the Worker with the new IDs first, then the site.
+If the site goes first, the new stations fail (the original 7 keep working).
 
 ## Step 4: Deploy to Cloudflare Pages
 
@@ -46,6 +42,9 @@ Files to update:
 4. Drag and drop these files:
    - `index.html`
    - `station.html`
+   - `stations.js`
+   - `temperature.html`
+   - `humidity.html`
    - `pressure.html`
 5. Click **Deploy**
 6. Your site will be live at `https://roaring.pages.dev` (or similar)
