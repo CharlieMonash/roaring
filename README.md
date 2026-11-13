@@ -29,8 +29,8 @@ All data comes from the Bureau of Meteorology (BOM):
 - Hobart (Ellerslie Road)
 - kunanyi (Mt Wellington)
 - Cape Bruny
-- Geeveston
-- Maatsuyker Island
+- Dunalley
+- Tasman Island
 - South Arm
 
 Data updates every 10 minutes from BOM.
