@@ -208,6 +208,17 @@
             height: auto;
         }
 
+        .station-card .mini-chart {
+            cursor: crosshair;
+            touch-action: pan-y;  /* sideways drags move the readout, vertical drags still scroll */
+        }
+
+        .card-time {
+            font-weight: 400;
+            color: #888;
+            margin-right: 2px;
+        }
+
         .mini-chart text {
             font-size: 9px;
             fill: #999;
@@ -777,7 +788,7 @@
         // Small SVG chart for the last chartHours hours.
         // Wind modes: speed + gust lines with direction arrows along the top.
         // Other modes: a single line for that measurement.
-        function buildMiniChart(points, range) {
+        function buildMiniChart(points, range, id) {
             const cfg = CHART_MODES[displayMode];
             const hasValue = p => p[cfg.key] !== null && p[cfg.key] !== undefined;
             if (points.length < 2 || (cfg && points.filter(hasValue).length < 2)) {
@@ -795,6 +806,15 @@
 
             const x = t => left + ((t - t0) / (t1 - t0)) * (W - left - right);
             const y = v => bottom - ((v - min) / (max - min)) * (bottom - top);
+
+            // Everything the hover readout needs to map the pointer back to a reading
+            const hoverAttrs = `data-id="${id}" data-t0="${t0}" data-t1="${t1}" data-left="${left}" data-plot-right="${W - right}"
+                data-top="${top}" data-bottom="${bottom}" data-min="${min}" data-max="${max}"`;
+            const hoverMarker = `<g class="hover-marker" style="display:none">
+                <line class="hover-line" stroke="#999" stroke-width="1" stroke-dasharray="3 2"/>
+                <circle class="hover-dot hover-dot-a" r="3.5" fill="#fff" stroke-width="2" stroke="${cfg ? cfg.color : '#e63946'}"/>
+                ${cfg ? '' : '<circle class="hover-dot hover-dot-b" r="3" fill="#fff" stroke-width="1.5" stroke="#999"/>'}
+            </g>`;
 
             // Line path that breaks at missing values
             const linePath = key => {
@@ -830,10 +850,11 @@
                 <text x="${W - right}" y="${H - 6}" text-anchor="end">${formatHM(new Date(t1))}</text>`;
 
             if (cfg) {
-                return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${cfg.label} over the last ${chartHours} hours">
+                return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" ${hoverAttrs} role="img" aria-label="${cfg.label} over the last ${chartHours} hours">
                     ${grid}
                     <path d="${linePath(cfg.key)}" fill="none" stroke="${cfg.color}" stroke-width="2" stroke-linejoin="round"/>
                     ${timeLabels}
+                    ${hoverMarker}
                 </svg>`;
             }
 
@@ -857,12 +878,13 @@
                 }
             }
 
-            return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wind speed, gusts and direction over the last ${chartHours} hours">
+            return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" ${hoverAttrs} role="img" aria-label="Wind speed, gusts and direction over the last ${chartHours} hours">
                 ${grid}
                 <path d="${linePath('gust_kt')}" fill="none" stroke="#bbb" stroke-width="1.5" stroke-linejoin="round"/>
                 <path d="${linePath('wind_spd_kt')}" fill="none" stroke="#e63946" stroke-width="2" stroke-linejoin="round"/>
                 ${arrows}
                 ${timeLabels}
+                ${hoverMarker}
             </svg>`;
         }
 
@@ -887,7 +909,9 @@
         function buildStationSummary(id, data, range) {
             const latest = data.data[0];
             const stale = isDataStale(latest.local_date_time_full);
-            const chart = stale ? '' : buildMiniChart(recentObservations(data), range);
+            const points = recentObservations(data);
+            chartPoints[id] = points;
+            const chart = stale ? '' : buildMiniChart(points, range, id);
             return { html: buildCardHead(id, latest, stale) + chart, stale };
         }
 
@@ -898,6 +922,103 @@
                 : `<span style="--swatch: #e63946">Speed</span>
                    <span style="--swatch: #bbb">Gusts</span>
                    <span style="--swatch: #457b9d">Direction</span>`;
+        }
+
+        // ---- Hover / tap readout on the charts below the map ----
+        // Mouse: hover a chart to see the reading at that time. Touch: tap or drag sideways.
+        // The card's current-value line shows the reading while active.
+        const chartPoints = {};  // station id -> points currently drawn in its chart
+        let lastPointerType = 'mouse';
+
+        function readoutHtml(p) {
+            const cfg = CHART_MODES[displayMode];
+            const time = `<span class="card-time">${formatHM(new Date(p.t))}</span>`;
+            if (cfg) {
+                const v = p[cfg.key];
+                return `${time}${v === null || v === undefined ? '--' : (cfg.round ? Math.round(v) : v) + cfg.unit}`;
+            }
+            const gust = p.gust_kt !== null && p.gust_kt !== undefined ? `<span class="gust">G${p.gust_kt}</span>` : '';
+            return `${time}<div class="wind-marker-arrow">${createWindArrowSVG(p.wind_dir, p.wind_spd_kt)}</div>${p.wind_spd_kt ?? '--'}kt ${gust}`;
+        }
+
+        function showReadout(svg, clientX) {
+            const pts = chartPoints[svg.dataset.id];
+            if (!pts?.length) return;
+            const d = svg.dataset;
+            const t0 = +d.t0, t1 = +d.t1, L = +d.left, R = +d.plotRight;
+            const top = +d.top, bottom = +d.bottom, min = +d.min, max = +d.max;
+
+            // Pointer position in the SVG's own coordinates
+            const pt = svg.createSVGPoint();
+            pt.x = clientX; pt.y = 0;
+            const localX = pt.matrixTransform(svg.getScreenCTM().inverse()).x;
+            const t = t0 + ((localX - L) / (R - L)) * (t1 - t0);
+
+            // Nearest reading in time (skipping gaps for the single-value charts)
+            const cfg = CHART_MODES[displayMode];
+            const usable = cfg ? pts.filter(p => p[cfg.key] !== null && p[cfg.key] !== undefined) : pts;
+            if (!usable.length) return;
+            const p = usable.reduce((best, q) => Math.abs(q.t - t) < Math.abs(best.t - t) ? q : best);
+
+            const x = L + ((p.t - t0) / (t1 - t0)) * (R - L);
+            const y = v => bottom - ((v - min) / (max - min)) * (bottom - top);
+            const marker = svg.querySelector('.hover-marker');
+            const line = marker.querySelector('.hover-line');
+            line.setAttribute('x1', x); line.setAttribute('x2', x);
+            line.setAttribute('y1', top); line.setAttribute('y2', bottom);
+            const placeDot = (dot, v) => {
+                if (!dot) return;
+                const show = v !== null && v !== undefined;
+                dot.style.display = show ? '' : 'none';
+                if (show) { dot.setAttribute('cx', x); dot.setAttribute('cy', y(v)); }
+            };
+            placeDot(marker.querySelector('.hover-dot-a'), cfg ? p[cfg.key] : p.wind_spd_kt);
+            placeDot(marker.querySelector('.hover-dot-b'), cfg ? null : p.gust_kt);
+            marker.style.display = '';
+
+            const now = svg.closest('.station-card')?.querySelector('.card-now');
+            if (now) {
+                if (now.dataset.orig === undefined) now.dataset.orig = now.innerHTML;
+                now.innerHTML = readoutHtml(p);
+            }
+        }
+
+        function clearReadout(svg) {
+            svg.querySelector('.hover-marker').style.display = 'none';
+            const now = svg.closest('.station-card')?.querySelector('.card-now');
+            if (now && now.dataset.orig !== undefined) {
+                now.innerHTML = now.dataset.orig;
+                delete now.dataset.orig;
+            }
+        }
+
+        function setupChartReadouts() {
+            const grid = document.getElementById('stationGrid');
+            const chartFor = e => e.target.closest?.('svg.mini-chart');
+
+            grid.addEventListener('pointerdown', e => {
+                lastPointerType = e.pointerType;
+                const svg = chartFor(e);
+                if (svg && e.pointerType !== 'mouse') showReadout(svg, e.clientX);
+            });
+            grid.addEventListener('pointermove', e => {
+                const svg = chartFor(e);
+                if (svg) showReadout(svg, e.clientX);
+            });
+            // Mouse: clear when leaving the chart. Touch: keep it until another tap elsewhere.
+            grid.addEventListener('pointerout', e => {
+                const svg = chartFor(e);
+                if (svg && e.pointerType === 'mouse' && !svg.contains(e.relatedTarget)) clearReadout(svg);
+            });
+            document.addEventListener('pointerdown', e => {
+                if (e.pointerType === 'mouse') return;
+                const tapped = chartFor(e);
+                grid.querySelectorAll('svg.mini-chart').forEach(svg => { if (svg !== tapped) clearReadout(svg); });
+            });
+            // On touch, tapping a chart shows the reading instead of opening the station page
+            grid.addEventListener('click', e => {
+                if (lastPointerType !== 'mouse' && chartFor(e)) e.preventDefault();
+            });
         }
 
         // Cards below the map for the stations in view, in station order
@@ -936,6 +1057,7 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             initMap();
+            setupChartReadouts();
             loadAllData();
         });
     </script>

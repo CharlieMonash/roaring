@@ -249,6 +249,65 @@
             border-color: #333;
         }
 
+        /* Hover / tap readout on the chart */
+        .chart-wrap {
+            position: relative;
+        }
+
+        .chart-wrap .chart-canvas {
+            display: block;
+            cursor: crosshair;
+            touch-action: pan-y;  /* sideways drags move the readout, vertical drags still scroll */
+        }
+
+        .chart-hover {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+
+        .chart-hover-line {
+            position: absolute;
+            width: 0;
+            border-left: 1px dashed #999;
+        }
+
+        .chart-hover-dot {
+            position: absolute;
+            width: 9px;
+            height: 9px;
+            margin: -4.5px 0 0 -4.5px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid;
+            box-sizing: border-box;
+        }
+
+        .chart-hover-box {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+            padding: 0.4rem 0.6rem;
+            font-size: 0.75rem;
+            line-height: 1.5;
+            white-space: nowrap;
+            color: #333;
+        }
+
+        .chart-hover-box .hover-time {
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .chart-hover-box .hover-swatch {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
         .chart-canvas {
             width: 100%;
             height: 250px;
@@ -414,9 +473,16 @@
                     <button class="time-range-btn" data-hours="3">3h</button>
                     <button class="time-range-btn active" data-hours="6">6h</button>
                     <button class="time-range-btn" data-hours="12">12h</button>
+                    <button class="time-range-btn" data-hours="max" title="All readings BOM has for this station (usually about 3 days)">Max</button>
                 </div>
             </div>
-            <canvas id="windChart" class="chart-canvas" style="height: 300px;"></canvas>
+            <div class="chart-wrap">
+                <canvas id="windChart" class="chart-canvas" style="height: 300px;"></canvas>
+                <div class="chart-hover" hidden>
+                    <div class="chart-hover-line"></div>
+                    <div class="chart-hover-box"></div>
+                </div>
+            </div>
             <div class="legend">
                 <div class="legend-item">
                     <div class="legend-color" style="background: #e63946;"></div>
@@ -446,7 +512,7 @@
 
         let stationId = null;
         let chartData = [];
-        let selectedHours = 6; // Default to 6 hours (36 data points at 10min intervals)
+        let selectedHours = 6; // Default to 6 hours; Infinity = "Max" (all readings BOM provides)
 
         // Convert wind direction to degrees
         function windDirToDegrees(dir) {
@@ -623,9 +689,11 @@
             ctx.textAlign = 'center';
 
             const labels = options.labels || [];
-            // Show fewer labels on narrow screens (aim for ~4-6 labels max)
-            const maxLabels = Math.max(4, Math.floor(chartWidth / 60));
+            // Space labels by their real width so longer ones (e.g. "Thu 14:00") never overlap
+            const labelWidth = Math.max(40, ...labels.map(l => ctx.measureText(l).width)) + 16;
+            const maxLabels = Math.max(2, Math.floor(chartWidth / labelWidth));
             const labelStep = Math.max(1, Math.ceil(labels.length / maxLabels));
+            const xStep = chartWidth / (labels.length - 1);
 
             labels.forEach((label, i) => {
                 // Show first, last, and evenly spaced labels
@@ -634,8 +702,10 @@
                 const isStep = i % labelStep === 0;
 
                 if (!isFirst && !isLast && !isStep) return;
+                // Skip a step label that would crowd the last one
+                if (!isLast && (labels.length - 1 - i) * xStep < labelWidth) return;
 
-                const x = padding.left + (chartWidth / (labels.length - 1)) * i;
+                const x = padding.left + xStep * i;
                 ctx.fillText(label, x, height - padding.bottom + 20);
             });
 
@@ -660,6 +730,85 @@
                 ctx.fillText(options.rightAxisLabel, 0, 0);
                 ctx.restore();
             }
+
+            // Remember the layout for the hover / tap readout, and hide any stale readout
+            canvas._layout = {
+                padding, chartWidth, chartHeight, width,
+                n: datasets[0]?.data.length || 0,
+                labels,
+                datasets: datasets.map(ds => ({
+                    ...ds,
+                    scale: ds.rightAxis ? [0, 360] : [minVal, maxVal]
+                }))
+            };
+            hideChartReadout(canvas);
+        }
+
+        // ---- Hover / tap readout ----
+        // Mouse: hover the chart to see the readings at that time. Touch: tap or drag sideways;
+        // the readout stays until you tap somewhere else.
+        function chartHoverEls(canvas) {
+            const wrap = canvas.closest('.chart-wrap');
+            return { wrap, layer: wrap.querySelector('.chart-hover'), line: wrap.querySelector('.chart-hover-line'), box: wrap.querySelector('.chart-hover-box') };
+        }
+
+        function hideChartReadout(canvas) {
+            const els = canvas.closest('.chart-wrap') && chartHoverEls(canvas);
+            if (els) els.layer.hidden = true;
+        }
+
+        function showChartReadout(canvas, clientX) {
+            const L = canvas._layout;
+            if (!L || L.n < 2) return;
+            const rect = canvas.getBoundingClientRect();
+            const px = clientX - rect.left;
+
+            // Readings are evenly spaced across the chart (as drawn), so snap to the nearest one
+            const step = L.chartWidth / (L.n - 1);
+            const i = Math.max(0, Math.min(L.n - 1, Math.round((px - L.padding.left) / step)));
+            const x = L.padding.left + step * i;
+            const yFor = (ds, v) => L.padding.top + L.chartHeight - ((v - ds.scale[0]) / (ds.scale[1] - ds.scale[0])) * L.chartHeight;
+
+            const { layer, line, box } = chartHoverEls(canvas);
+            layer.querySelectorAll('.chart-hover-dot').forEach(d => d.remove());
+
+            line.style.left = `${x}px`;
+            line.style.top = `${L.padding.top}px`;
+            line.style.height = `${L.chartHeight}px`;
+
+            let rows = '';
+            // Rows in reading order (Speed, Gusts, Direction), whatever order they were drawn in
+            [...L.datasets].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).forEach(ds => {
+                const v = ds.data[i];
+                if (v !== null && v !== undefined) {
+                    const dot = document.createElement('div');
+                    dot.className = 'chart-hover-dot';
+                    dot.style.left = `${x}px`;
+                    dot.style.top = `${yFor(ds, v)}px`;
+                    dot.style.borderColor = ds.color;
+                    layer.appendChild(dot);
+                }
+                const text = v === null || v === undefined ? '--' : (ds.format ? ds.format(v, i) : v);
+                rows += `<div><span class="hover-swatch" style="background:${ds.color}"></span>${ds.label}: <b>${text}</b></div>`;
+            });
+            box.innerHTML = `<div class="hover-time">${L.labels[i] ?? ''}</div>${rows}`;
+
+            // Keep the box beside the line, flipping to the left near the right edge
+            layer.hidden = false;
+            const boxW = box.offsetWidth;
+            const left = x + 12 + boxW > L.width ? x - 12 - boxW : x + 12;
+            box.style.left = `${Math.max(0, left)}px`;
+            box.style.top = `${L.padding.top}px`;
+        }
+
+        function setupChartReadout(canvas) {
+            const wrap = canvas.closest('.chart-wrap');
+            wrap.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') showChartReadout(canvas, e.clientX); });
+            wrap.addEventListener('pointermove', e => showChartReadout(canvas, e.clientX));
+            wrap.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideChartReadout(canvas); });
+            document.addEventListener('pointerdown', e => {
+                if (e.pointerType !== 'mouse' && !wrap.contains(e.target)) hideChartReadout(canvas);
+            });
         }
 
         // Update current conditions display
@@ -699,14 +848,20 @@
             // Reverse data so oldest is first (left side of chart)
             const reversed = [...data].reverse();
 
-            // Calculate how many data points to show based on selected hours
-            // BOM data is at 10-minute intervals, so 6 per hour
-            const dataPoints = selectedHours * 6;
-            const displayData = reversed.slice(-dataPoints);
+            // Keep readings within the selected hours of the newest one. (Cut by time, not by
+            // count: BOM readings are usually half-hourly, with occasional 10-minute bursts.)
+            const newest = reversed.length ? parseDateTime(reversed[reversed.length - 1].local_date_time_full).getTime() : 0;
+            const cutoff = newest - selectedHours * 3600 * 1000;
+            const displayData = reversed.filter(d => parseDateTime(d.local_date_time_full).getTime() >= cutoff);
 
+            // Over a day of data (e.g. "Max"), include the weekday so repeated times aren't ambiguous
+            const oldest = displayData.length ? parseDateTime(displayData[0].local_date_time_full).getTime() : newest;
+            const multiDay = newest - oldest > 24 * 3600 * 1000;
             const times = displayData.map(d => {
                 const dt = parseDateTime(d.local_date_time_full);
-                return formatTime(dt);
+                return multiDay
+                    ? `${dt.toLocaleDateString('en-AU', { weekday: 'short' })} ${formatTime(dt)}`
+                    : formatTime(dt);
             });
 
             // Combined wind chart with speed, gusts, and direction (dual Y-axis)
@@ -714,18 +869,27 @@
                 {
                     data: displayData.map(d => d.gust_kt),
                     color: '#aaa',
-                    lineWidth: 1.5
+                    lineWidth: 1.5,
+                    label: 'Gusts',
+                    order: 2,
+                    format: v => `${v}kt`
                 },
                 {
                     data: displayData.map(d => d.wind_spd_kt),
                     color: '#e63946',
-                    lineWidth: 2
+                    lineWidth: 2,
+                    label: 'Speed',
+                    order: 1,
+                    format: v => `${v}kt`
                 },
                 {
                     data: displayData.map(d => windDirToDegrees(d.wind_dir)),
                     color: '#457b9d',
                     rightAxis: true,
-                    dotsOnly: true
+                    dotsOnly: true,
+                    label: 'Direction',
+                    order: 3,
+                    format: (v, i) => displayData[i].wind_dir
                 }
             ], {
                 labels: times,
@@ -758,7 +922,7 @@
                     btn.classList.add('active');
 
                     // Update selected hours and redraw
-                    selectedHours = parseInt(btn.dataset.hours);
+                    selectedHours = btn.dataset.hours === 'max' ? Infinity : parseInt(btn.dataset.hours);
                     if (chartData.length > 0) {
                         drawCharts(chartData);
                     }
@@ -833,6 +997,7 @@
             document.getElementById('stationName').textContent = findStation(stationId)?.fullName || 'Loading...';
             setupInfoToggle();
             setupTimeRangeButtons();
+            setupChartReadout(document.getElementById('windChart'));
             loadData();
 
             window.addEventListener('resize', handleResize);
