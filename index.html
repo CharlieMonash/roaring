@@ -139,6 +139,7 @@
 
         .toggle-buttons {
             display: flex;
+            flex-wrap: wrap;
             gap: 0.5rem;
             margin-bottom: 1rem;
         }
@@ -220,10 +221,43 @@
         .recent-header {
             display: flex;
             justify-content: space-between;
-            align-items: baseline;
+            align-items: center;
             flex-wrap: wrap;
             gap: 0.5rem;
             margin-bottom: 0.75rem;
+        }
+
+        .recent-title-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        /* Same as the time range buttons on station.html */
+        .time-range-btns {
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .time-range-btn {
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            padding: 0.35rem 0.75rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: #666;
+            transition: all 0.15s;
+        }
+
+        .time-range-btn:hover {
+            background: #eee;
+        }
+
+        .time-range-btn.active {
+            background: #333;
+            color: #fff;
+            border-color: #333;
         }
 
         .recent-title {
@@ -360,6 +394,8 @@
             <button class="toggle-btn active" data-mode="wind" onclick="setDisplayMode('wind')">Wind</button>
             <button class="toggle-btn" data-mode="gusts" onclick="setDisplayMode('gusts')">Gusts</button>
             <button class="toggle-btn" data-mode="temp" onclick="setDisplayMode('temp')">Temperature</button>
+            <button class="toggle-btn" data-mode="pressure" onclick="setDisplayMode('pressure')">Pressure</button>
+            <button class="toggle-btn" data-mode="humidity" onclick="setDisplayMode('humidity')">Humidity</button>
         </div>
 
         <div class="map-container">
@@ -368,8 +404,15 @@
 
         <section class="recent-section">
             <div class="recent-header">
-                <h2 class="recent-title">Last 3 hours</h2>
-                <div class="recent-legend">
+                <div class="recent-title-group">
+                    <h2 class="recent-title" id="recentTitle">Last 3 hours</h2>
+                    <div class="time-range-btns">
+                        <button class="time-range-btn active" data-hours="3" onclick="setChartHours(3)">3h</button>
+                        <button class="time-range-btn" data-hours="6" onclick="setChartHours(6)">6h</button>
+                        <button class="time-range-btn" data-hours="12" onclick="setChartHours(12)">12h</button>
+                    </div>
+                </div>
+                <div class="recent-legend" id="recentLegend">
                     <span style="--swatch: #e63946">Speed</span>
                     <span style="--swatch: #bbb">Gusts</span>
                     <span style="--swatch: #457b9d">Direction</span>
@@ -395,7 +438,7 @@
         let stationData = {};
         let map = null;
         let markers = {};
-        let displayMode = 'wind';  // 'wind', 'gusts', or 'temp'
+        let displayMode = 'wind';  // 'wind', 'gusts', 'temp', 'pressure' or 'humidity'
 
         // Initialize map
         function initMap() {
@@ -500,6 +543,13 @@
                 displayValue = latest.gust_kt !== null ? `${latest.gust_kt}kt` : '--';
             } else if (displayMode === 'temp') {
                 displayValue = latest.air_temp !== null ? `${latest.air_temp}°C` : '--';
+                showArrow = false;
+            } else if (displayMode === 'pressure') {
+                // Not every station measures pressure - those show '--'
+                displayValue = latest.press !== null && latest.press !== undefined ? `${Math.round(latest.press)}` : '--';
+                showArrow = false;
+            } else if (displayMode === 'humidity') {
+                displayValue = latest.rel_hum !== null && latest.rel_hum !== undefined ? `${latest.rel_hum}%` : '--';
                 showArrow = false;
             }
 
@@ -627,7 +677,7 @@
                     // Hover preview on devices with a mouse; touch users get the cards below.
                     // Built on hover so it uses the scale for the current map view.
                     if (canHover && !isDataStale(data.data[0].local_date_time_full)) {
-                        marker.bindTooltip(() => buildStationSummary(id, data, sharedYMax()).html, {
+                        marker.bindTooltip(() => buildStationSummary(id, data, sharedRange()).html, {
                             direction: 'top',
                             offset: [0, -16],
                             opacity: 1,
@@ -642,19 +692,28 @@
             // Don't auto-fit bounds - keep user's current zoom/pan
         }
 
-        const CHART_HOURS = 3;
+        let chartHours = 3;  // 3, 6 or 12 - set by the buttons above the charts
+
+        function setChartHours(hours) {
+            chartHours = hours;
+            document.querySelectorAll('.time-range-btn').forEach(btn => {
+                btn.classList.toggle('active', Number(btn.dataset.hours) === hours);
+            });
+            document.getElementById('recentTitle').textContent = `Last ${hours} hours`;
+            updateStationGrid();
+        }
         const canHover = window.matchMedia('(hover: hover)').matches;
 
         function formatHM(date) {
             return date.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
         }
 
-        // Observations from the last CHART_HOURS hours, oldest first
+        // Observations from the last chartHours hours, oldest first
         function recentObservations(data) {
             const obs = data.data.filter(d => d.local_date_time_full);
             if (obs.length === 0) return [];
             const newest = parseDateTime(obs[0].local_date_time_full);
-            const cutoff = newest.getTime() - CHART_HOURS * 3600 * 1000;
+            const cutoff = newest.getTime() - chartHours * 3600 * 1000;
             return obs
                 .map(d => ({ ...d, t: parseDateTime(d.local_date_time_full).getTime() }))
                 .filter(d => d.t >= cutoff)
@@ -667,34 +726,75 @@
             return STATIONS.filter(s => stationData[s.id]?.data?.length && bounds.contains([s.lat, s.lon]));
         }
 
-        // One knots scale for every chart in view so they can be compared at a glance:
-        // 0–20kt by default, stepping up in 10s if any visible station's recent speed or gust goes higher
+        // What the mini charts show for each map button. Wind and Gusts share the wind chart.
+        const CHART_MODES = {
+            temp:     { key: 'air_temp', unit: '°C',  label: 'Temperature', color: '#e76f51', step: 5, minSpan: 10 },
+            pressure: { key: 'press',    unit: 'hPa', label: 'Pressure',    color: '#457b9d', step: 5, minSpan: 10, round: true },
+            humidity: { key: 'rel_hum',  unit: '%',   label: 'Humidity',    color: '#2a9d8f', fixed: [0, 100] }
+        };
+        const isWindMode = () => !CHART_MODES[displayMode];
+
+        // One scale for every chart in view so they can be compared at a glance.
+        // Wind: 0–20kt by default, stepping up in 10s if any visible station's speed or gust goes higher.
+        // Temperature / pressure: rounded to 5s around the visible stations' range (at least 10 wide).
+        // Humidity: always 0–100%.
         const DEFAULT_Y_MAX = 20;
 
-        function sharedYMax() {
-            let maxVal = 0;
+        function sharedRange() {
+            const cfg = CHART_MODES[displayMode];
+            if (cfg?.fixed) return { min: cfg.fixed[0], max: cfg.fixed[1] };
+
+            const values = [];
             stationsInView().forEach(s => {
                 const data = stationData[s.id];
                 if (isDataStale(data.data[0].local_date_time_full)) return;
                 recentObservations(data).forEach(p => {
-                    maxVal = Math.max(maxVal, p.gust_kt ?? 0, p.wind_spd_kt ?? 0);
+                    if (cfg) {
+                        if (p[cfg.key] !== null && p[cfg.key] !== undefined) values.push(p[cfg.key]);
+                    } else {
+                        values.push(p.gust_kt ?? 0, p.wind_spd_kt ?? 0);
+                    }
                 });
             });
-            return Math.max(DEFAULT_Y_MAX, Math.ceil(maxVal / 10) * 10);
+
+            if (!cfg) {
+                const maxVal = values.length ? Math.max(...values) : 0;
+                return { min: 0, max: Math.max(DEFAULT_Y_MAX, Math.ceil(maxVal / 10) * 10) };
+            }
+            if (!values.length) return { min: 0, max: cfg.minSpan };
+            const dataMin = Math.min(...values), dataMax = Math.max(...values);
+            let min = Math.floor(dataMin / cfg.step) * cfg.step;
+            let max = Math.ceil(dataMax / cfg.step) * cfg.step;
+            if (max === min) max += cfg.step;
+            // Widen to the minimum span and to an even number of steps (so the middle line is a
+            // round number), each time adding a step on whichever side the data is closest to
+            while (max - min < cfg.minSpan || ((max - min) / cfg.step) % 2) {
+                if (dataMin - min < max - dataMax) min -= cfg.step; else max += cfg.step;
+            }
+            return { min, max };
         }
 
-        // Small SVG chart: speed + gust lines, direction arrows along the top
-        function buildMiniChart(points, yMax) {
-            if (points.length < 2) {
-                return `<div class="card-empty">Not enough recent data</div>`;
+        // Small SVG chart for the last chartHours hours.
+        // Wind modes: speed + gust lines with direction arrows along the top.
+        // Other modes: a single line for that measurement.
+        function buildMiniChart(points, range) {
+            const cfg = CHART_MODES[displayMode];
+            const hasValue = p => p[cfg.key] !== null && p[cfg.key] !== undefined;
+            if (points.length < 2 || (cfg && points.filter(hasValue).length < 2)) {
+                const what = cfg ? `${cfg.label.toLowerCase()} data` : 'recent data';
+                return `<div class="card-empty">${cfg && !points.some(hasValue) ? `No ${what}` : `Not enough ${what}`}</div>`;
             }
 
             const W = 300, H = 120;
-            const left = 22, right = 8, top = 26, bottom = 100;
+            const { min, max } = range;
+            const mid = (min + max) / 2;
+            // Room for the widest y label (e.g. "1020" for pressure)
+            const labelChars = Math.max(...[min, mid, max].map(v => String(v).length));
+            const left = 8 + labelChars * 5.5, right = 8, top = cfg ? 12 : 26, bottom = 100;
             const t0 = points[0].t, t1 = points[points.length - 1].t;
 
             const x = t => left + ((t - t0) / (t1 - t0)) * (W - left - right);
-            const y = v => bottom - (v / yMax) * (bottom - top);
+            const y = v => bottom - ((v - min) / (max - min)) * (bottom - top);
 
             // Line path that breaks at missing values
             const linePath = key => {
@@ -708,12 +808,34 @@
                 return d;
             };
 
-            // Grid lines + y labels at 0, half, max
+            // Minor grid lines: 5 per gap between labelled lines (e.g. every 2kt on 0–20kt)
             let grid = '';
-            [0, yMax / 2, yMax].forEach(v => {
-                grid += `<line x1="${left}" x2="${W - right}" y1="${y(v)}" y2="${y(v)}" stroke="#eee" stroke-width="1"/>`;
+            const minorStep = (mid - min) / 5;
+            for (let v = min + minorStep; v < max - minorStep / 2; v += minorStep) {
+                if (Math.abs(v - mid) < minorStep / 2) continue;
+                grid += `<line x1="${left}" x2="${W - right}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#f3f3f3" stroke-width="1"/>`;
+            }
+
+            // Major grid lines + y labels at min, middle, max
+            [min, mid, max].forEach(v => {
+                grid += `<line x1="${left}" x2="${W - right}" y1="${y(v)}" y2="${y(v)}" stroke="#e2e2e2" stroke-width="1"/>`;
                 grid += `<text x="${left - 4}" y="${y(v) + 3}" text-anchor="end">${v}</text>`;
             });
+
+            // Time labels: start, middle, end
+            const tMid = t0 + (t1 - t0) / 2;
+            const timeLabels = `
+                <text x="${left}" y="${H - 6}" text-anchor="start">${formatHM(new Date(t0))}</text>
+                <text x="${x(tMid)}" y="${H - 6}" text-anchor="middle">${formatHM(new Date(tMid))}</text>
+                <text x="${W - right}" y="${H - 6}" text-anchor="end">${formatHM(new Date(t1))}</text>`;
+
+            if (cfg) {
+                return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${cfg.label} over the last ${chartHours} hours">
+                    ${grid}
+                    <path d="${linePath(cfg.key)}" fill="none" stroke="${cfg.color}" stroke-width="2" stroke-linejoin="round"/>
+                    ${timeLabels}
+                </svg>`;
+            }
 
             // Direction arrows, newest first, skipping any too close to the last one drawn
             // (BOM readings are irregular: half-hourly, with 10-minute bursts)
@@ -735,14 +857,7 @@
                 }
             }
 
-            // Time labels: start, middle, end
-            const tMid = t0 + (t1 - t0) / 2;
-            const timeLabels = `
-                <text x="${left}" y="${H - 6}" text-anchor="start">${formatHM(new Date(t0))}</text>
-                <text x="${x(tMid)}" y="${H - 6}" text-anchor="middle">${formatHM(new Date(tMid))}</text>
-                <text x="${W - right}" y="${H - 6}" text-anchor="end">${formatHM(new Date(t1))}</text>`;
-
-            return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wind speed, gusts and direction over the last ${CHART_HOURS} hours">
+            return `<svg class="mini-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wind speed, gusts and direction over the last ${chartHours} hours">
                 ${grid}
                 <path d="${linePath('gust_kt')}" fill="none" stroke="#bbb" stroke-width="1.5" stroke-linejoin="round"/>
                 <path d="${linePath('wind_spd_kt')}" fill="none" stroke="#e63946" stroke-width="2" stroke-linejoin="round"/>
@@ -754,9 +869,13 @@
         // Name + current reading row shared by cards and tooltips
         function buildCardHead(id, latest, stale) {
             const name = STATIONS.find(s => s.id === id)?.name ?? id;
+            const cfg = CHART_MODES[displayMode];
             let now;
             if (stale) {
                 now = 'No recent data';
+            } else if (cfg) {
+                const v = latest[cfg.key];
+                now = v !== null && v !== undefined ? `${cfg.round ? Math.round(v) : v}${cfg.unit}` : '--';
             } else {
                 const spd = latest.wind_spd_kt ?? '--';
                 const gust = latest.gust_kt !== null ? `<span class="gust">G${latest.gust_kt}</span>` : '';
@@ -765,25 +884,35 @@
             return `<div class="card-head"><span class="card-name">${name}</span><span class="card-now">${now}</span></div>`;
         }
 
-        function buildStationSummary(id, data, yMax) {
+        function buildStationSummary(id, data, range) {
             const latest = data.data[0];
             const stale = isDataStale(latest.local_date_time_full);
-            const chart = stale ? '' : buildMiniChart(recentObservations(data), yMax);
+            const chart = stale ? '' : buildMiniChart(recentObservations(data), range);
             return { html: buildCardHead(id, latest, stale) + chart, stale };
+        }
+
+        function updateLegend() {
+            const cfg = CHART_MODES[displayMode];
+            document.getElementById('recentLegend').innerHTML = cfg
+                ? `<span style="--swatch: ${cfg.color}">${cfg.label} (${cfg.unit})</span>`
+                : `<span style="--swatch: #e63946">Speed</span>
+                   <span style="--swatch: #bbb">Gusts</span>
+                   <span style="--swatch: #457b9d">Direction</span>`;
         }
 
         // Cards below the map for the stations in view, in station order
         function updateStationGrid() {
+            updateLegend();
             const grid = document.getElementById('stationGrid');
             const visible = stationsInView();
             if (visible.length === 0) {
                 grid.innerHTML = `<div class="card-empty" style="grid-column: 1 / -1">No stations in this part of the map</div>`;
                 return;
             }
-            const yMax = sharedYMax();
+            const range = sharedRange();
             grid.innerHTML = visible
                 .map(s => {
-                    const { html, stale } = buildStationSummary(s.id, stationData[s.id], yMax);
+                    const { html, stale } = buildStationSummary(s.id, stationData[s.id], range);
                     return `<a class="station-card${stale ? ' stale' : ''}" href="station.html?id=${s.id}">${html}</a>`;
                 })
                 .join('');
